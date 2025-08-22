@@ -128,7 +128,24 @@ app.whenReady().then(() => {
       const hasUpdate = compareSemver(current, latest) < 0;
       return { current, latest, hasUpdate, release: r.updateInfo };
     } catch (e: any) {
-      return { error: e.message || 'Update check failed' };
+      // Fallback: parse Atom feed for latest tag if GitHub API returns 406 / parsing issue
+      const msg = e?.message || '';
+      if (/406/.test(msg) || /Unable to find latest version/i.test(msg)) {
+        try {
+          const feedRes = await fetch('https://github.com/johngibsondesign/ArenaBuddy/releases.atom', { headers: { 'Accept': 'application/atom+xml,application/xml' } });
+          const xml = await feedRes.text();
+          const m = xml.match(/<title>(v?\d+\.\d+\.\d+)<\/title>/); // first title after feed title is latest release
+          if (m) {
+            const latest = m[1].replace(/^v/, '');
+            const current = app.getVersion();
+            const hasUpdate = compareSemver(current, latest) < 0;
+            return { current, latest, hasUpdate, fallback: true };
+          }
+        } catch (fe) {
+          return { error: msg, fallbackError: (fe as any)?.message };
+        }
+      }
+      return { error: msg || 'Update check failed' };
     }
   });
   ipcMain.handle('app:startUpdateDownload', async () => {

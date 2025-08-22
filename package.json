@@ -1,9 +1,13 @@
 ﻿{
     "name":  "arena-buddy",
-    "version":  "0.1.13",
+    "version":  "0.1.14",
     "private":  true,
     "main":  "dist/main/main.js",
     "description":  "ArenaBuddy - Electron + React + Tailwind starter",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/johngibsondesign/ArenaBuddy.git"
+    },
     "author":  "",
     "license":  "MIT",
     "scripts":  {
@@ -56,16 +60,14 @@
     "build":  {
                   "appId":  "com.arenabuddy.app",
                   "productName":  "ArenaBuddy",
-                  "directories":  {
-                                      "output":  "release"
-                                  },
-                  "files":  [
-                                "dist/**/*",
-                                "package.json"
-                            ],
+                  "directories":  { "output":  "release" },
+                  "files":  [ "dist/**/*", "package.json" ],
                   "publish":  [
                                   {
-                                      "provider":  "github"
+                                      "provider":  "github",
+                                      "owner": "johngibsondesign",
+                                      "repo": "ArenaBuddy",
+                                      "releaseType": "release"
                                   }
                               ]
               }
