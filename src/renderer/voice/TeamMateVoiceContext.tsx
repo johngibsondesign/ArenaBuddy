@@ -162,6 +162,14 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
         if (!teammate && phaseStr === 'InProgress' && session?.gameData?.playerChampionSelections && Array.isArray(session.gameData.playerChampionSelections)) {
           const selections = session.gameData.playerChampionSelections as any[];
           dlog('InProgress selections detected', { count: selections.length, sample: selections.slice(0,3).map(s => ({ champ: s.championId, puuid: (s.puuid||'').slice(0,8) })) });
+          // Log full key set once for diagnostics
+          try {
+            const keySig = selections.length ? Object.keys(selections[0]).sort().join(',') : '';
+            if (keySig && !(window as any).__loggedSelectionKeys) {
+              (window as any).__loggedSelectionKeys = true;
+              dlog('Selection object keys', keySig);
+            }
+          } catch {}
           // Attempt lightweight enrichment every 15s max to avoid hammering LCU
           const now = Date.now();
           if (now - lastSelectionResolveRef.current > 15000) {
@@ -194,36 +202,63 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
           }
           // Additional Arena heuristic: array ordering pairs (0,1)(2,3)... choose adjacent entry as partner
           if (!teammate && me?.puuid) {
-            const idx = selections.findIndex(s => s.puuid === me.puuid);
-            if (idx !== -1) {
-              const pairIdx = idx % 2 === 0 ? idx + 1 : idx - 1;
-              if (pairIdx >= 0 && pairIdx < selections.length) {
-                const partner = selections[pairIdx];
-                if (partner?.puuid && partner.puuid !== me.puuid) {
-                  const cache = puuidCacheRef.current;
-                  const pc = cache[partner.puuid];
-                  if (pc?.gameName) {
-                    teammate = { gameName: pc.gameName, tagLine: pc.tagLine };
-                    teammatePuuidRef.current = partner.puuid;
-                    dlog('Teammate resolved via ordering heuristic', { idx, pairIdx, partner: partner.puuid.slice(0,8), name: pc.gameName + '#' + (pc.tagLine||'') });
-                  } else {
-                    // fetch immediately (one-off) if not cached
-                    try {
-                      const info = await api.getSummonerByPuuid(partner.puuid);
-                      if (info?.gameName) {
-                        puuidCacheRef.current[partner.puuid] = { gameName: info.gameName, tagLine: info.tagLine, fetched: Date.now() };
-                        teammate = { gameName: info.gameName, tagLine: info.tagLine };
-                        teammatePuuidRef.current = partner.puuid;
-                        dlog('Teammate fetched via ordering heuristic lookup', { idx, pairIdx, partner: partner.puuid.slice(0,8), name: info.gameName + '#' + (info.tagLine||'') });
-                      }
-                    } catch {/* ignore */}
-                  }
+            const mySel = selections.find(s => s.puuid === me.puuid);
+            if (mySel) {
+              // Try subteam / party style keys
+              const partnerKeys = ['subteamId','partyId','pairId','groupId'];
+              let partner: any = null;
+              for (const key of partnerKeys) {
+                if (mySel[key] !== undefined && mySel[key] !== null) {
+                  const val = mySel[key];
+                  const same = selections.filter(s => s !== mySel && s[key] === val);
+                  if (same.length === 1) { partner = same[0]; dlog('Partner resolved via key', { key, value: val, partner: (partner.puuid||'').slice(0,8) }); break; }
                 }
-              } else {
-                dlog('Ordering heuristic pair index out of range', { idx, pairIdx });
+              }
+              // Fallback: search for selection sharing first 6 chars of puuid prefix grouping (some internal grouping style)
+              if (!partner) {
+                const prefix = (mySel.puuid||'').slice(0,6);
+                const samePrefix = selections.filter(s => s !== mySel && (s.puuid||'').startsWith(prefix));
+                if (samePrefix.length === 1) { partner = samePrefix[0]; dlog('Partner resolved via puuid prefix heuristic', { prefix, partner: (partner.puuid||'').slice(0,8) }); }
+              }
+              // Last resort: previous adjacency heuristic but only if not already set and we have not previously chosen a different teammate
+              if (!partner) {
+                const idx = selections.indexOf(mySel);
+                if (idx !== -1) {
+                  const candidateIdxs = [idx+1, idx-1, idx+2, idx-2];
+                  for (const ci of candidateIdxs) {
+                    if (ci >=0 && ci < selections.length) { partner = selections[ci]; break; }
+                  }
+                  if (partner) dlog('Partner fallback via expanded adjacency', { idx, partnerIdx: selections.indexOf(partner) });
+                }
+              }
+              if (partner?.puuid && partner.puuid !== me.puuid) {
+                const cache = puuidCacheRef.current;
+                let info = cache[partner.puuid];
+                if (!info) {
+                  try {
+                    const sInfo = await api.getSummonerByPuuid(partner.puuid);
+                    if (sInfo?.gameName) info = cache[partner.puuid] = { gameName: sInfo.gameName, tagLine: sInfo.tagLine, fetched: Date.now() };
+                  } catch {/* ignore */}
+                }
+                if (info?.gameName) {
+                  // If we already selected a different teammate earlier, only overwrite if manual override matches this one or previous not confirmed
+                  const candidateName = info.gameName + '#' + (info.tagLine||'');
+                  const manual = (() => { try { return localStorage.getItem('voice.manualTeammate'); } catch { return null; } })();
+                  if (!prevTeammateRef.current || (manual && manual.startsWith(info.gameName + '#'))) {
+                    teammate = { gameName: info.gameName, tagLine: info.tagLine };
+                    teammatePuuidRef.current = partner.puuid;
+                    dlog('Teammate resolved via multi-heuristic Arena logic', { puuid: partner.puuid.slice(0,8), name: candidateName });
+                  } else {
+                    dlog('Candidate partner ignored to avoid overwriting existing teammate', { candidate: candidateName, existing: prevTeammateRef.current });
+                  }
+                } else {
+                  dlog('Partner puuid found but name not yet resolved');
+                }
+              } else if (!partner) {
+                dlog('Arena partner could not be determined (all heuristics)');
               }
             } else {
-              dlog('Ordering heuristic: self not found in selections');
+              dlog('Arena heuristic: my selection missing');
             }
           }
         }
