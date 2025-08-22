@@ -32,6 +32,8 @@ export class VoiceManager {
   private pendingIce: Record<string, any[]> = {};
   private lastMetaSent?: string; // to avoid flooding identical metadata
   private negotiationWatchdogs: Record<string, any> = {};
+  private candidateStats: Record<string, { count: number; types: Record<string, number>; timer?: any; gathering?: string }> = {};
+  private inboundWatchdogs: Record<string, any> = {};
 
   private isInitiator(remoteId: string) {
     // Deterministic ordering rule; if equal (should never) fall back to comparing lengths
@@ -226,12 +228,20 @@ export class VoiceManager {
     if (id === 'legacy') { if (!this.pc) this.createPeer(); return this.pc!; }
     if (this.peers.has(id)) return this.peers.get(id)!;
     const pc = new RTCPeerConnection(rtcConfig); this.peers.set(id, pc);
+    // Pre-emptively add an audio transceiver so that an offer includes audio even if track delayed
+    try { if (!this.localStream) pc.addTransceiver('audio', { direction: 'sendrecv' }); } catch {}
     if (this.localStream) this.localStream.getTracks().forEach(t => pc.addTrack(t, this.localStream!));
   else this.vlog('no localStream when creating peer; delaying track add', { peer: id });
   pc.onicecandidate = (e) => { if (e.candidate) this.send({ type: 'candidate', candidate: e.candidate, to: id } as any); };
     pc.ontrack = (e) => {
       this.vlog('ontrack', { peer: id, streams: e.streams.length, trackId: e.track.id, kind: e.track.kind, muted: (e as any).track?.muted });
       this.attachStream(id, e.streams[0]);
+    };
+    pc.onicegatheringstatechange = () => {
+      this.vlog('iceGatheringState', { peer: id, state: pc.iceGatheringState });
+      if (!this.candidateStats[id]) this.candidateStats[id] = { count: 0, types: {} };
+      this.candidateStats[id].gathering = pc.iceGatheringState;
+      if (pc.iceGatheringState === 'complete') this.flushCandidateStats(id, 'gathering-complete');
     };
     pc.onnegotiationneeded = () => { this.vlog('negotiationneeded', { peer: id, signalingState: pc.signalingState }); };
     // If we are initiator and negotiationneeded fires before we created an offer, schedule negotiation
@@ -266,6 +276,28 @@ export class VoiceManager {
     stats.forEach(r => { if (r.type === 'inbound-rtp' && r.kind === 'audio') inbound = r; else if (r.type === 'outbound-rtp' && r.kind === 'audio') outbound = r; });
     if (inbound) this.vlog('inbound-audio-stats', { peer: id, bytes: inbound.bytesReceived, packets: inbound.packetsReceived, jitter: inbound.jitter, packetsLost: inbound.packetsLost });
     if (outbound) this.vlog('outbound-audio-stats', { peer: id, bytes: outbound.bytesSent, packets: outbound.packetsSent });
+        // Watchdog: if after 10s we have outbound bytes but still zero inbound, attempt ICE restart (initiator only)
+        if (outbound && outbound.bytesSent > 0 && (!inbound || inbound.bytesReceived === 0)) {
+          if (!this.inboundWatchdogs[id]) {
+            this.inboundWatchdogs[id] = setTimeout(() => {
+              const pc2 = this.peers.get(id);
+              if (!pc2) return; // removed
+              let inbound2: any = null; let outbound2: any = null;
+              pc2.getStats().then(st2 => {
+                st2.forEach(r => { if (r.type === 'inbound-rtp' && r.kind === 'audio') inbound2 = r; else if (r.type === 'outbound-rtp' && r.kind === 'audio') outbound2 = r; });
+                if (outbound2 && outbound2.bytesSent > 0 && (!inbound2 || inbound2.bytesReceived === 0)) {
+                  if (this.isInitiator(id)) {
+                    this.vlog('audio watchdog triggering ICE restart', { peer: id });
+                    try { pc2.restartIce(); } catch {}
+                    // Schedule renegotiation
+                    this.scheduleNegotiation(id, 'watchdog-restart', 200);
+                  }
+                }
+                delete this.inboundWatchdogs[id];
+              }).catch(() => { delete this.inboundWatchdogs[id]; });
+            }, 10000);
+          }
+        }
       } catch {}
     }, 5000);
     return pc;
@@ -358,6 +390,18 @@ export class VoiceManager {
           } else {
             try { await pc.addIceCandidate(msg.candidate); this.vlog('candidate added', { from }); } catch (e) { this.vlog('candidate error', { from, e }); }
           }
+          // Track candidate types for diagnostics
+          try {
+            const cand = msg.candidate.candidate || '';
+            const m = cand.match(/ typ ([a-zA-Z0-9]+)/);
+            const typ = m ? m[1] : 'unknown';
+            if (!this.candidateStats[from]) this.candidateStats[from] = { count: 0, types: {} };
+            this.candidateStats[from].count += 1;
+            this.candidateStats[from].types[typ] = (this.candidateStats[from].types[typ]||0)+1;
+            if (!this.candidateStats[from].timer) {
+              this.candidateStats[from].timer = setTimeout(() => this.flushCandidateStats(from, 'timer'), 4000);
+            }
+          } catch {}
         }
         break; }
       case 'metadata': {
@@ -543,6 +587,12 @@ export class VoiceManager {
         }, 2000);
       }
     }
+  }
+
+  private flushCandidateStats(peer: string, reason: string) {
+    const cs = this.candidateStats[peer]; if (!cs) return;
+    if (cs.timer) { clearTimeout(cs.timer); cs.timer = null; }
+    this.vlog('candidate-summary', { peer, reason, count: cs.count, types: cs.types, gathering: cs.gathering });
   }
 }
 
