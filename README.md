@@ -49,6 +49,90 @@ Legacy key embedding & proxy code were removed (`scripts/embed-riot-key.js`, `pr
 - Add ranked stats, match history
 - Improved champion detail (abilities, stats)
 
+### Voice / Signaling Production Checklist
+
+1. Supabase Project:
+	- Create project, copy Project URL and anon public key.
+	- Deploy the `riot-search` function with your Riot API key in Supabase environment variables.
+	- (Optional) Enable Realtime logs to monitor channel usage.
+2. GitHub Secrets (for build + auto-update):
+	- `SUPABASE_FUNCTIONS_URL`
+	- `VITE_SUPABASE_URL`
+	- `VITE_SUPABASE_ANON_KEY`
+	- Optionally TURN credentials: `VITE_TURN_URLS`, `VITE_TURN_USERNAME`, `VITE_TURN_CREDENTIAL`.
+3. TURN Server (recommended for NAT traversal):
+	- Quick test (temporary) using a managed service (e.g. Twilio/Numb Cloud STUN/TURN). For full control:
+	  - Install coturn on a public VM (Ubuntu example):
+		 ```bash
+		 sudo apt update && sudo apt install coturn -y
+		 sudo sed -i 's/#TURNSERVER_ENABLED=0/TURNSERVER_ENABLED=1/' /etc/default/coturn
+		 cat <<EOF | sudo tee /etc/turnserver.conf
+		 listening-port=3478
+		 fingerprint
+		 realm=yourdomain.com
+		 total-quota=100
+		 bps-capacity=0
+		 stale-nonce
+		 no-loopback-peers
+		 no-multicast-peers
+		 no-cli
+		 # Static auth user
+		 user=turnuser:turnpassword
+		 # Recommended security
+		 no-tlsv1
+		 no-tlsv1_1
+		 # (Add certificates + listening on TLS port 5349 if needed)
+		 EOF
+		 sudo systemctl enable coturn --now
+		 ```
+	  - Open UDP/TCP 3478 (and 5349 if TLS) in firewall.
+	  - Put `turn:your.server:3478` into `VITE_TURN_URLS` along with any additional `turns:` entries for TLS.
+4. Build Embedding:
+	- The build picks up `VITE_*` vars for renderer and `SUPABASE_FUNCTIONS_URL` for function calls.
+5. Testing Matrix:
+	- Two machines behind different NAT types (home vs mobile hotspot) to confirm TURN fallback.
+	- Simulate packet loss or disconnect; ensure rejoin logic (future enhancement) restores call.
+6. Security Hardening:
+	- Randomize/obfuscate voice channel name (currently `voice_<riotId>` pattern). Consider hashing with a shared secret.
+	- Add server rule (edge function) to issue signed short-lived token for channel join (Supabase Realtime can use JWT claims).
+
+### TURN Notes
+If you provide a TURN server & credentials via environment variables, the app automatically includes them in the ICE server list (`rtcConfig`). Without TURN, some peers will fail to connect (symmetrical NAT / corporate networks).
+
+### Environment Variables Summary
+See `.env.example` for all required and optional vars.
+
 ---
 MIT License.
+
+### LCU Detection Library
+
+The app includes a lightweight League Client (LCU) detector under `src/lcu` that:
+
+- Watches the League lockfile to know when the client is up/down
+- Parses auth (port/password/protocol) and exposes status events
+- Fetches current summoner and Riot ID by merging `/lol-summoner/v1/current-summoner` and `/lol-chat/v1/me`.
+
+Public API:
+
+```ts
+import * as lcu from './src/lcu';
+
+const offUp = lcu.on('up', async () => {
+	try {
+		const me = await lcu.getCurrentUser({ timeoutMs: 2500 });
+		console.log('LCU user:', me.displayName, me.gameName ? `${me.gameName}#${me.tagLine}` : '');
+	} catch (e) {
+		console.error('Failed to fetch current user:', e);
+	}
+});
+
+const offDown = lcu.on('down', () => console.log('LCU down'));
+```
+
+Run the demo:
+
+```
+npx ts-node scripts/lcu-demo.ts
+```
 

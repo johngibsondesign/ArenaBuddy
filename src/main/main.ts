@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
+import * as lcu from './lcu';
 import { autoUpdater, UpdateInfo, ProgressInfo } from 'electron-updater';
 import 'dotenv/config';
 import path from 'node:path';
@@ -10,6 +11,57 @@ try {
 } catch {}
 
 const isDev = process.env.NODE_ENV === 'development';
+
+// Register LCU IPC handlers using new library
+try { ipcMain.removeHandler('lcu:isDetected'); } catch {}
+try { ipcMain.removeHandler('lcu:getCurrentSummoner'); } catch {}
+try { ipcMain.removeHandler('lcu:getLobby'); } catch {}
+try { ipcMain.removeHandler('lcu:getGameflowPhase'); } catch {}
+try { ipcMain.removeHandler('lcu:getGameflowSession'); } catch {}
+try { ipcMain.removeHandler('lcu:getChampSelectSession'); } catch {}
+ipcMain.handle('lcu:isDetected', () => ({ detected: lcu.getStatus() === 'UP' }));
+ipcMain.handle('lcu:getCurrentSummoner', async () => {
+  if (lcu.getStatus() !== 'UP') return null;
+  try {
+    const user = await lcu.getCurrentUser({ timeoutMs: 2000 });
+    console.log('[lcu] fetched user', {
+      displayName: user.displayName,
+      gameName: user.gameName,
+      tagLine: user.tagLine,
+      summonerId: user.summonerId,
+      puuid: user.puuid,
+      profileIconId: user.profileIconId,
+      summonerLevel: user.summonerLevel
+    });
+    const riotId = user.gameName || user.displayName || 'Player';
+    const tagLine = (user.tagLine && user.tagLine.length > 0) ? user.tagLine : '';
+    if (!user.gameName || !user.tagLine) {
+      console.warn('[lcu] missing riotId components', { resolvedRiotId: riotId, tagLine, raw: user });
+    }
+    return {
+      riotId,
+      tagLine,
+      profileIconId: user.profileIconId,
+      level: user.summonerLevel,
+      summonerId: user.summonerId,
+      puuid: user.puuid,
+      displayName: user.displayName,
+      gameName: user.gameName
+    };
+  } catch (e:any) {
+    console.warn('[lcu] getCurrentSummoner error', e?.message);
+    return { error: e?.message || 'fetch-failed' };
+  }
+});
+ipcMain.handle('lcu:getLobby', () => lcu.getLobby());
+ipcMain.handle('lcu:getGameflowPhase', () => lcu.getGameflowPhase());
+ipcMain.handle('lcu:getGameflowSession', () => lcu.getGameflowSession());
+ipcMain.handle('lcu:getChampSelectSession', () => lcu.getChampSelectSession());
+
+// Raw debug fetch of underlying endpoints
+ipcMain.handle('lcu:debugRawUser', async () => {
+  try { return await (lcu as any).debugRawUser(); } catch (e:any) { return { status: 'ERROR', error: e?.message }; }
+});
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -28,8 +80,17 @@ function createWindow() {
   });
 
   if (isDev) {
-    win.loadURL('http://localhost:5173');
-    win.webContents.openDevTools();
+    const devUrl = 'http://localhost:5173';
+    const tryLoad = (attempt = 0) => {
+      fetch(devUrl, { method: 'HEAD' }).then(() => {
+        win.loadURL(devUrl);
+        win.webContents.openDevTools();
+      }).catch(() => {
+        if (attempt < 25) setTimeout(() => tryLoad(attempt + 1), 200);
+        else win.loadURL(devUrl); // final attempt anyway
+      });
+    };
+    tryLoad();
   } else {
     win.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
@@ -117,6 +178,7 @@ app.whenReady().then(() => {
 
   // App version retrieval
   ipcMain.handle('app:getVersion', () => app.getVersion());
+  // LCU handlers already registered above (avoid duplicate registration on hot reload)
 
   // Use electron-updater for unified update check
   ipcMain.handle('app:checkForUpdate', async () => {

@@ -13,7 +13,7 @@
     "scripts":  {
                     "dev":  "cross-env NODE_ENV=development concurrently \"npm:dev:mainwatch\" \"npm:dev:renderer\" \"npm:dev:tailwind\" \"npm:dev:electron\"",
                     "dev:mainwatch":  "tsc -p tsconfig.main.json --watch",
-                    "dev:electron":  "wait-on dist/main/main.js dist/main/preload.js \u0026\u0026 electron dist/main/main.js",
+                    "dev:electron":  "wait-on dist/main/main.js dist/main/preload.js http://localhost:5173 \u0026\u0026 electron dist/main/main.js",
                     "dev:renderer":  "vite",
                     "dev:tailwind":  "tailwindcss -i ./src/renderer/index.css -o ./src/renderer/output.css --watch",
                     "prebuild": "node scripts/check-bom.js",
@@ -55,7 +55,8 @@
                          "@fortawesome/free-solid-svg-icons":  "^6.5.2",
                          "@fortawesome/react-fontawesome":  "^0.2.0",
                          "dotenv":  "^16.4.5",
-                         "electron-updater":  "^6.1.8"
+                         "electron-updater":  "^6.1.8",
+                         "@supabase/supabase-js": "^2.44.4"
                      },
     "build":  {
                   "appId":  "com.arenabuddy.app",
