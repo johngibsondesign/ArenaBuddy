@@ -28,6 +28,7 @@ export class VoiceManager {
   private selfId: string = crypto.randomUUID();
   private pendingMeta: any = null;
   private metaFlushTimer: any = null;
+  private identity: { name?: string; iconId?: number; riotId?: string; tagLine?: string } = {};
   // Debug helpers (enable with localStorage.setItem('voice.debugVoice','1'))
   private debugVoiceEnabled() { try { return localStorage.getItem('voice.debugVoice') === '1'; } catch { return false; } }
   private vlog(...args: any[]) { if (this.debugVoiceEnabled()) { try { console.log('[Voice]', ...args); } catch {} } }
@@ -114,6 +115,17 @@ export class VoiceManager {
   this.vlog('connect requested', { lobbyId, signalingUrl, meta });
   this.patch({ connecting: true, error: null, lobbyId, selfId: this.selfId });
     try {
+      // Ensure we have local media before negotiating
+      if (!this.localStream) {
+        try { await this.initDevices(); } catch (e) { this.vlog('initDevices failed before connect', (e as any)?.message); }
+      }
+      // store identity for later re-broadcast
+      if (meta) this.identity = { ...this.identity, ...meta };
+      // Add self participant entry if missing (for UI controls)
+      if (!this.state.participants.find(p => p.id === this.selfId)) {
+        (this.state.participants as any).push({ id: this.selfId, name: meta?.name, iconId: meta?.iconId, riotId: meta?.riotId, tagLine: meta?.tagLine, muted: this.state.muted });
+        this.emit();
+      }
   if (signalingUrl.startsWith('supabase://')) {
         await this.initSupabase(signalingUrl, lobbyId, meta);
       } else {
@@ -240,6 +252,15 @@ export class VoiceManager {
         if (typeof msg.speaking === 'boolean') participant.speaking = msg.speaking;
         this.emit();
     this.vlog('metadata received', { from, keys: Object.keys(msg).filter(k => !['type','from','to'].includes(k)) });
+        // Fallback: if we have not established a peer yet (no offer/answer traffic) attempt negotiation deterministically
+        if (!this.peers.get(from)) {
+          const initiator = this.selfId < from; // simple deterministic rule
+          this.vlog('metadata fallback peer check', { from, initiator });
+          const pc = this.getOrCreatePeer(from);
+          if (initiator && pc.signalingState === 'stable') {
+            try { await this.startOffer(from); } catch (e) { this.vlog('offer start error (metadata fallback)', (e as any)?.message); }
+          }
+        }
         break; }
       case 'leave': { this.removePeer(from); break; }
     }
@@ -349,7 +370,9 @@ export class VoiceManager {
   }
 
   private queueMeta(p: any) {
-    this.pendingMeta = { ...(this.pendingMeta||{}), ...p };
+  // Always include stable identity attributes so late joiners learn them
+  const identity = this.identity;
+  this.pendingMeta = { ...(this.pendingMeta||{}), ...identity, ...p };
     if (!this.metaFlushTimer) {
       this.metaFlushTimer = setTimeout(() => {
         const payload = this.pendingMeta; this.pendingMeta = null; this.metaFlushTimer = null;
