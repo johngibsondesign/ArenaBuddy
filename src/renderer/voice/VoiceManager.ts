@@ -31,6 +31,32 @@ export class VoiceManager {
   private identity: { name?: string; iconId?: number; riotId?: string; tagLine?: string } = {};
   private pendingIce: Record<string, any[]> = {};
   private lastMetaSent?: string; // to avoid flooding identical metadata
+  private negotiationWatchdogs: Record<string, any> = {};
+
+  private isInitiator(remoteId: string) {
+    // Deterministic ordering rule; if equal (should never) fall back to comparing lengths
+    if (this.selfId === remoteId) return false;
+    if (this.selfId < remoteId) return true;
+    return false;
+  }
+
+  private scheduleNegotiation(remoteId: string, reason: string, delay = 150) {
+    const pc = this.getOrCreatePeer(remoteId);
+    const initiator = this.isInitiator(remoteId);
+    this.vlog('scheduleNegotiation', { remoteId, reason, initiator, delay, signalingState: pc.signalingState });
+    if (!initiator) return; // only initiator actively schedules
+    setTimeout(() => {
+      // Only start offer if still needed
+      const haveLocal = !!pc.currentLocalDescription; const haveRemote = !!pc.currentRemoteDescription;
+      if (haveLocal || haveRemote) return;
+      if (pc.signalingState === 'stable') {
+        this.ensureSendTrack(remoteId);
+        this.startOffer(remoteId).catch(e => this.vlog('scheduleNegotiation offer error', (e as any)?.message));
+      } else {
+        this.vlog('scheduleNegotiation skip (not stable)', { remoteId, state: pc.signalingState });
+      }
+    }, delay + Math.floor(Math.random()*120)); // jitter to reduce glare risk
+  }
   // Debug helpers (enable with localStorage.setItem('voice.debugVoice','1'))
   private debugVoiceEnabled() { try { return localStorage.getItem('voice.debugVoice') === '1'; } catch { return false; } }
   private vlog(...args: any[]) { if (this.debugVoiceEnabled()) { try { console.log('[Voice]', ...args); } catch {} } }
@@ -164,8 +190,14 @@ export class VoiceManager {
           const pc = this.getOrCreatePeer(r);
           // Deterministic initiator rule prevents double offer (glare): lexicographically smaller id starts
           const initiator = this.selfId < r;
-          if (initiator && pc.signalingState === 'stable') this.startOffer(r);
-          else this.vlog('defer offer (waiting for remote)', { peer: r, initiator, signalingState: pc.signalingState });
+          if (initiator && pc.signalingState === 'stable') {
+            this.vlog('presence initiator will offer', { peer: r });
+            this.scheduleNegotiation(r, 'presence-new-peer', 60);
+          } else {
+            this.vlog('defer offer (waiting for remote)', { peer: r, initiator, signalingState: pc.signalingState });
+            // Still schedule a watchdog in case remote never sends an offer
+            this.scheduleNegotiation(r, 'presence-watchdog', 1200);
+          }
         }
       });
       this.presenceSet = newSet;
@@ -202,6 +234,11 @@ export class VoiceManager {
       this.attachStream(id, e.streams[0]);
     };
     pc.onnegotiationneeded = () => { this.vlog('negotiationneeded', { peer: id, signalingState: pc.signalingState }); };
+    // If we are initiator and negotiationneeded fires before we created an offer, schedule negotiation
+    pc.onnegotiationneeded = () => {
+      this.vlog('negotiationneeded', { peer: id, signalingState: pc.signalingState });
+      if (this.isInitiator(id)) this.scheduleNegotiation(id, 'onnegotiationneeded', 40);
+    };
     pc.onsignalingstatechange = () => { this.vlog('signalingState', { peer: id, state: pc.signalingState }); };
     pc.oniceconnectionstatechange = () => {
       const st = pc.iceConnectionState;
@@ -348,6 +385,7 @@ export class VoiceManager {
       return;
     }
     this.ensureSendTrack(remoteId);
+  this.vlog('creating offer', { to: remoteId });
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
   this.send({ type: 'offer', sdp: offer, to: remoteId } as any);
@@ -492,6 +530,17 @@ export class VoiceManager {
       if (initiator && pc.signalingState === 'stable') {
         this.ensureSendTrack(remoteId);
         this.startOffer(remoteId).catch(e => this.vlog('negotiateIfNeeded offer error', (e as any)?.message));
+      }
+      // Watchdog: if still no SDP after 2s, re-attempt (only initiator)
+      if (!this.negotiationWatchdogs[remoteId] && initiator) {
+        this.negotiationWatchdogs[remoteId] = setTimeout(() => {
+          const haveL = !!pc.currentLocalDescription; const haveR = !!pc.currentRemoteDescription;
+            if (!haveL && !haveR) {
+              this.vlog('negotiation watchdog firing', { remoteId });
+              if (pc.signalingState === 'stable') this.startOffer(remoteId).catch(e => this.vlog('watchdog offer error', (e as any)?.message));
+            }
+            delete this.negotiationWatchdogs[remoteId];
+        }, 2000);
       }
     }
   }
