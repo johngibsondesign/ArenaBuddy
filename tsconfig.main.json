@@ -1,15 +1,16 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-  "module": "CommonJS",
+    "module": "CommonJS",
     "moduleResolution": "Node",
     "outDir": "dist/main",
     "rootDir": "src/main",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["node", "electron"]
+  "types": ["node"],
+    "typeRoots": ["./node_modules/@types", "./src/types"]
   },
-  "include": ["src/main/**/*"],
+  "include": ["src/main/**/*", "src/types/**/*"],
   "exclude": ["node_modules"]
 }

@@ -1,0 +1,45 @@
+name: Build & Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Lint & Typecheck
+        run: |
+          npm run lint || echo "Lint warnings"
+          npm run typecheck
+
+      - name: Build app
+        run: npm run build
+
+      - name: Package & Publish (GitHub Releases)
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
+        run: npx electron-builder --win --publish always
+
+      - name: Upload Dist Artifact (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-win
+          path: dist
+
+  # Future matrix (mac/linux) targets can be added here.

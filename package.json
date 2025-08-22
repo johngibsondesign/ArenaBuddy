@@ -16,6 +16,7 @@
     "build": "npm run build:tailwind && vite build && npm run build:main",
     "build:tailwind": "tailwindcss -i ./src/renderer/index.css -o ./src/renderer/output.css --minify",
     "build:main": "tsc -p tsconfig.main.json",
+  "dist:app": "npm run build && electron-builder",
     "clean": "rimraf dist",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
@@ -38,7 +39,8 @@
   "vite": "^5.1.4",
   "@vitejs/plugin-react": "^4.2.1",
   "wait-on": "^7.2.0",
-  "rimraf": "^5.0.5"
+  "rimraf": "^5.0.5",
+  "electron-builder": "^24.13.3"
   },
   "dependencies": {
     "react": "^18.2.0",
@@ -50,6 +52,17 @@
   "dotenv": "^16.4.5",
   "express": "^4.19.2",
   "cors": "^2.8.5",
-  "node-fetch": "^3.3.2"
+  "node-fetch": "^3.3.2",
+  "electron-updater": "^6.1.8"
+  }
+  ,"build": {
+    "appId": "com.arenabuddy.app",
+    "productName": "ArenaBuddy",
+    "directories": { "output": "release" },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "publish": [ { "provider": "github" } ]
   }
 }

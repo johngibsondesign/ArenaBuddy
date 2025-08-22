@@ -282,6 +282,72 @@ const ChampionPage: React.FC = () => {
 	);
 };
 
+// Settings Page
+const SettingsPage: React.FC = () => {
+	const [version, setVersion] = React.useState<string>('');
+	const [status, setStatus] = React.useState<string>('idle');
+	const [info, setInfo] = React.useState<any>(null);
+	const [progress, setProgress] = React.useState<any>(null);
+	const [error, setError] = React.useState<string | null>(null);
+	const api: any = (window as any).api;
+
+	React.useEffect(() => { (async () => { try { const v = await api?.app?.getVersion(); if (v) setVersion(v); } catch {} })(); }, []);
+
+	React.useEffect(() => {
+		api?.app?.onUpdateEvent?.((evt: string, payload: any) => {
+			if (evt === 'update:available') { setStatus('update-available'); setInfo(payload); }
+			if (evt === 'update:not-available') { setStatus('up-to-date'); setInfo(payload); }
+			if (evt === 'update:download-progress') { setStatus('downloading'); setProgress(payload); }
+			if (evt === 'update:downloaded') { setStatus('downloaded'); setInfo(payload); }
+			if (evt === 'update:error') { setStatus('error'); setError(payload); }
+		});
+	}, []);
+
+	const manualCheck = async () => {
+		setError(null); setStatus('checking');
+		const r = await api?.app?.checkForUpdate();
+		if (r?.error) { setStatus('error'); setError(r.error); }
+		else {
+			setInfo(r.release || r);
+			setStatus(r.hasUpdate ? 'update-available' : 'up-to-date');
+		}
+	};
+	const startDownload = async () => { setError(null); setStatus('starting-download'); const r = await api?.app?.startUpdateDownload(); if (r?.error) { setStatus('error'); setError(r.error); } };
+	const installNow = async () => { await api?.app?.quitAndInstall(); };
+
+	return (
+		<div className="flex flex-1 flex-col p-8 text-gray-200 overflow-auto bg-gray-950">
+			<h1 className="text-2xl font-semibold mb-6"><span className="bg-gradient-to-br from-sky-400 to-violet-600 bg-clip-text text-transparent">Settings</span></h1>
+			<div className="space-y-6 max-w-xl">
+				<section className="bg-gray-900/60 border border-gray-800 rounded-lg p-5">
+					<h2 className="text-sm font-semibold tracking-wide text-gray-300 mb-3">Application</h2>
+					<div className="text-xs text-gray-400 mb-4">Current Version: <span className="text-gray-200 font-medium">{version || '—'}</span></div>
+					<div className="flex gap-3 flex-wrap mb-4">
+						<button onClick={manualCheck} disabled={status==='checking'} className="px-4 py-2 rounded-md bg-gradient-to-br from-sky-400 to-violet-600 text-white text-xs font-medium shadow hover:from-sky-300 hover:to-violet-500 disabled:opacity-40">{status==='checking' ? 'Checking…' : 'Check for Updates'}</button>
+						{status==='update-available' && <button onClick={startDownload} className="px-4 py-2 rounded-md bg-gray-800 border border-sky-500/40 text-xs font-medium hover:bg-gray-700">Download Update</button>}
+						{status==='downloaded' && <button onClick={installNow} className="px-4 py-2 rounded-md bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500">Install & Restart</button>}
+					</div>
+					<div className="text-[11px] text-gray-400 space-y-1">
+						<div>Status: <span className="text-gray-300">{status}</span></div>
+						{progress && status==='downloading' && (
+							<div className="w-full bg-gray-800 rounded h-2 overflow-hidden">
+								<div className="bg-gradient-to-r from-sky-400 to-violet-600 h-full transition-all" style={{width: `${Math.round(progress.percent||0)}%`}} />
+							</div>
+						)}
+						{info?.releaseNotes && status!=='downloading' && (
+							<details className="bg-gray-800/60 rounded p-3 border border-gray-700">
+								<summary className="cursor-pointer select-none text-gray-300">Release Notes</summary>
+								<pre className="mt-2 whitespace-pre-wrap text-[11px] leading-relaxed text-gray-400 max-h-60 overflow-auto">{info.releaseNotes}</pre>
+							</details>
+						)}
+						{error && <div className="text-red-400 whitespace-pre-wrap">{error}</div>}
+					</div>
+				</section>
+			</div>
+		</div>
+	);
+};
+
 // Champions Listing Page
 const ChampionsPage: React.FC = () => {
 	const navigate = useNavigate();
@@ -393,6 +459,7 @@ const App: React.FC = () => (
 					<Route path="/" element={<SearchPage />} />
 					<Route path="/profile/:riotId/:tagLine" element={<ProfilePage />} />
 					<Route path="/champion/:champId" element={<ChampionPage />} />
+					  <Route path="/settings" element={<SettingsPage />} />
 					<Route path="/champions" element={<ChampionsPage />} />
 				</Routes>
 			</div>

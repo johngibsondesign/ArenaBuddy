@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
+import { autoUpdater, UpdateInfo, ProgressInfo } from 'electron-updater';
 import 'dotenv/config';
 import path from 'node:path';
 
@@ -29,8 +30,44 @@ function createWindow() {
   return win;
 }
 
+function setupAutoUpdater(win: BrowserWindow) {
+  autoUpdater.autoDownload = false; // manual download trigger
+  autoUpdater.on('error', (err: Error) => {
+    console.error('[update] error', err);
+    win.webContents.send('update:error', err?.message || String(err));
+  });
+  autoUpdater.on('update-available', (info: UpdateInfo) => {
+    console.log('[update] available', info.version);
+    win.webContents.send('update:available', info);
+  });
+  autoUpdater.on('update-not-available', (info: UpdateInfo) => {
+    console.log('[update] not-available', info.version);
+    win.webContents.send('update:not-available', info);
+  });
+  autoUpdater.on('download-progress', (p: ProgressInfo) => {
+    win.webContents.send('update:download-progress', p);
+  });
+  autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
+    console.log('[update] downloaded', info.version);
+    win.webContents.send('update:downloaded', info);
+  });
+}
+
+// Simple semver compare: returns -1 if a<b, 0 equal, 1 if a>b
+function compareSemver(a: string, b: string): number {
+  const pa = a.split('.').map(n => parseInt(n, 10));
+  const pb = b.split('.').map(n => parseInt(n, 10));
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0; const y = pb[i] || 0;
+    if (x < y) return -1; if (x > y) return 1;
+  }
+  return 0;
+}
+
 app.whenReady().then(() => {
   const win = createWindow();
+  setupAutoUpdater(win);
+  setTimeout(() => { autoUpdater.checkForUpdates().catch((e: any) => console.error('initial check error', e)); }, 3000);
 
   ipcMain.handle('window:minimize', () => {
     win.minimize();
@@ -106,6 +143,27 @@ app.whenReady().then(() => {
       return { ok: false, error: err.message || 'Request error' };
     }
   });
+
+  // App version retrieval
+  ipcMain.handle('app:getVersion', () => app.getVersion());
+
+  // Use electron-updater for unified update check
+  ipcMain.handle('app:checkForUpdate', async () => {
+    try {
+      const r = await autoUpdater.checkForUpdates();
+      if (!r) return { current: app.getVersion(), hasUpdate: false };
+      const latest = r.updateInfo.version;
+      const current = app.getVersion();
+      const hasUpdate = compareSemver(current, latest) < 0;
+      return { current, latest, hasUpdate, release: r.updateInfo };
+    } catch (e: any) {
+      return { error: e.message || 'Update check failed' };
+    }
+  });
+  ipcMain.handle('app:startUpdateDownload', async () => {
+    try { await autoUpdater.downloadUpdate(); return { started: true }; } catch (e: any) { return { error: e.message || 'Download failed' }; }
+  });
+  ipcMain.handle('app:quitAndInstall', () => { autoUpdater.quitAndInstall(); return { quitting: true }; });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -1,6 +1,6 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faHouse, faChessKnight } from '@fortawesome/free-solid-svg-icons';
+import { faHouse, faChessKnight, faGear } from '@fortawesome/free-solid-svg-icons';
 import { NavLink } from 'react-router-dom';
 
 export const Sidebar: React.FC = () => (
@@ -31,6 +31,15 @@ export const Sidebar: React.FC = () => (
               <FontAwesomeIcon icon={faChessKnight} className="text-lg" />
               <span className="invisible absolute start-full top-1/2 ms-3 -translate-y-1/2 rounded-sm bg-gray-900 px-2 py-1.5 text-xs font-medium text-white group-hover:visible">
                 Champions
+              </span>
+            </NavLink>
+            <NavLink
+              to="/settings"
+              className={({ isActive }) => `group relative flex size-10 items-center justify-center rounded-md ${isActive ? 'bg-gradient-to-br from-sky-400 to-violet-600 text-white' : 'bg-highlight/15 text-highlight hover:bg-highlight/25'} transition`}
+            >
+              <FontAwesomeIcon icon={faGear} className="text-lg" />
+              <span className="invisible absolute start-full top-1/2 ms-3 -translate-y-1/2 rounded-sm bg-gray-900 px-2 py-1.5 text-xs font-medium text-white group-hover:visible">
+                Settings
               </span>
             </NavLink>
           </nav>
