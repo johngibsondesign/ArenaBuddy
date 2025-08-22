@@ -26,6 +26,8 @@ Copy the Functions URL (looks like: `https://<project>.functions.supabase.co`) a
 ### GitHub Workflow
 The release workflow uses the secret `GH_TOKEN` (PAT with `public_repo` or appropriate scopes) and `SUPABASE_FUNCTIONS_URL` only. The Riot key lives exclusively in Supabase.
 
+At build time the value of `SUPABASE_FUNCTIONS_URL` is embedded into a generated file (`src/main/generatedConfig.ts`) so the packaged app still knows the endpoint even though runtime environment variables are not present on end-user machines.
+
 ### Local Development
 Create a local `.env` with:
 ```

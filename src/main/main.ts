@@ -2,6 +2,12 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { autoUpdater, UpdateInfo, ProgressInfo } from 'electron-updater';
 import 'dotenv/config';
 import path from 'node:path';
+// Generated at build time (contains supabaseFunctionsUrl). Optional during dev.
+let embeddedSupabaseUrl: string | undefined;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  embeddedSupabaseUrl = require('./generatedConfig').embedded?.supabaseFunctionsUrl;
+} catch {}
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -89,7 +95,7 @@ app.whenReady().then(() => {
     }
     const riotId = match[1].trim();
     const tagLine = match[2].trim();
-    const functionsBase = (process.env.SUPABASE_FUNCTIONS_URL || '').replace(/\/$/, '');
+  const functionsBase = (process.env.SUPABASE_FUNCTIONS_URL || embeddedSupabaseUrl || '').replace(/\/$/, '');
     if (!functionsBase) {
       return { ok: false, error: 'SUPABASE_FUNCTIONS_URL not configured. Cannot perform search.' };
     }
