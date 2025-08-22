@@ -217,6 +217,13 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
           dlog('Attempt connect (TeammateAppeared)', { lobbyId, teammate: teammate.gameName + '#' + (teammate.tagLine||''), me: me?.riotId + '#' + (me?.tagLine||''), phase: phaseStr });
           voice.connect(lobbyId, 'supabase://voice', { name: me?.riotId, iconId: me?.profileIconId, riotId: me?.riotId, tagLine: me?.tagLine } as any);
         }
+        else if (teammate?.gameName && voice.autoConnectInGame && !voice.state.connected && !voice.state.connecting && prevTeammateRef.current) {
+          dlog('Skip auto-connect (teammate already processed previously)', { teammate: teammate.gameName });
+        } else if (teammate?.gameName && !voice.autoConnectInGame) {
+          dlog('Skip auto-connect (autoConnectInGame disabled)');
+        } else if (teammate?.gameName && voice.state.connecting) {
+          dlog('Skip auto-connect (already connecting)');
+        }
         prevTeammateRef.current = teammate?.gameName || null;
 
         // Voice lifecycle logic
@@ -241,6 +248,8 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
               dlog('Already connected in lobby');
             } else if (teammate?.gameName && !voice.autoConnectInGame) {
               dlog('Teammate present but autoConnect disabled');
+            } else if (teammate?.gameName && voice.state.connecting) {
+              dlog('Already connecting in lobby');
             }
           } else if (phaseStr === 'InProgress') {
             // If we did not meet in lobby (solo queue then matched) connect now using deterministic duo id
@@ -258,6 +267,8 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
               dlog('Already connected in-game');
             } else if (teammate?.gameName && !voice.autoConnectInGame) {
               dlog('In game teammate present but autoConnect disabled');
+            } else if (teammate?.gameName && voice.state.connecting) {
+              dlog('Already connecting in-game');
             }
           }
           if (phaseStr === 'EndOfGame') {
