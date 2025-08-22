@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Routes, Route, useNavigate, useParams } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar/Sidebar';
 import './index.css';
 
@@ -448,8 +448,10 @@ const ScrollbarStyles: React.FC = () => (
 	`}</style>
 );
 
-const App: React.FC = () => (
-	<BrowserRouter>
+const App: React.FC = () => {
+	const Router: any = isElectron ? HashRouter : BrowserRouter;
+	return (
+	<Router>
 		<ScrollbarStyles />
 		<div className="flex flex-col h-screen w-full overflow-hidden">
 			<TitleBar />
@@ -461,10 +463,12 @@ const App: React.FC = () => (
 					<Route path="/champion/:champId" element={<ChampionPage />} />
 					  <Route path="/settings" element={<SettingsPage />} />
 					<Route path="/champions" element={<ChampionsPage />} />
+					<Route path="*" element={<SearchPage />} />
 				</Routes>
 			</div>
 		</div>
-	</BrowserRouter>
-);
+	</Router>
+	);
+};
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(<App />);
