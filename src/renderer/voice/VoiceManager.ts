@@ -29,6 +29,7 @@ export class VoiceManager {
   private pendingMeta: any = null;
   private metaFlushTimer: any = null;
   private identity: { name?: string; iconId?: number; riotId?: string; tagLine?: string } = {};
+  private pendingIce: Record<string, any[]> = {};
   // Debug helpers (enable with localStorage.setItem('voice.debugVoice','1'))
   private debugVoiceEnabled() { try { return localStorage.getItem('voice.debugVoice') === '1'; } catch { return false; } }
   private vlog(...args: any[]) { if (this.debugVoiceEnabled()) { try { console.log('[Voice]', ...args); } catch {} } }
@@ -267,6 +268,14 @@ export class VoiceManager {
   this.send({ type: 'answer', sdp: ans, to: from } as any);
         this.patch({ connected: true, connecting: false });
     this.vlog('answer sent', { to: from });
+        // Flush any queued ICE for this peer now that remote description is set
+        if (this.pendingIce[from]?.length) {
+          const queued = this.pendingIce[from];
+          delete this.pendingIce[from];
+          for (const c of queued) {
+            try { await pc.addIceCandidate(c); this.vlog('candidate added (flushed)', { from, queued: true }); } catch (e) { this.vlog('candidate error (flushed)', { from, e }); }
+          }
+        }
         break; }
       case 'answer': {
         const pc = this.getOrCreatePeer(from);
@@ -274,9 +283,27 @@ export class VoiceManager {
         await pc.setRemoteDescription(msg.sdp);
         this.patch({ connected: true, connecting: false });
     this.vlog('answer received', { from });
+        // Flush queued ICE
+        if (this.pendingIce[from]?.length) {
+          const queued = this.pendingIce[from];
+          delete this.pendingIce[from];
+          for (const c of queued) {
+            try { await pc.addIceCandidate(c); this.vlog('candidate added (flushed)', { from, queued: true }); } catch (e) { this.vlog('candidate error (flushed)', { from, e }); }
+          }
+        }
         break; }
       case 'candidate': {
-		if (msg.candidate) { const pc = this.getOrCreatePeer(from); try { await pc.addIceCandidate(msg.candidate); this.vlog('candidate added', { from }); } catch (e) { this.vlog('candidate error', { from, e }); } }
+        if (msg.candidate) {
+          const pc = this.getOrCreatePeer(from);
+          // If remote description not yet set, queue the candidate
+          if (!pc.remoteDescription) {
+            if (!this.pendingIce[from]) this.pendingIce[from] = [];
+            this.pendingIce[from].push(msg.candidate);
+            this.vlog('candidate queued', { from, count: this.pendingIce[from].length });
+          } else {
+            try { await pc.addIceCandidate(msg.candidate); this.vlog('candidate added', { from }); } catch (e) { this.vlog('candidate error', { from, e }); }
+          }
+        }
         break; }
       case 'metadata': {
         let participant = this.state.participants.find(p => p.id === from);
