@@ -161,7 +161,10 @@ export class VoiceManager {
       others.forEach(r => {
         if (!this.presenceSet.has(r)) {
           const pc = this.getOrCreatePeer(r);
-          if (pc.signalingState === 'stable') this.startOffer(r);
+          // Deterministic initiator rule prevents double offer (glare): lexicographically smaller id starts
+          const initiator = this.selfId < r;
+          if (initiator && pc.signalingState === 'stable') this.startOffer(r);
+          else this.vlog('defer offer (waiting for remote)', { peer: r, initiator, signalingState: pc.signalingState });
         }
       });
       this.presenceSet = newSet;
@@ -190,6 +193,7 @@ export class VoiceManager {
     if (this.peers.has(id)) return this.peers.get(id)!;
     const pc = new RTCPeerConnection(rtcConfig); this.peers.set(id, pc);
     if (this.localStream) this.localStream.getTracks().forEach(t => pc.addTrack(t, this.localStream!));
+  else this.vlog('no localStream when creating peer; delaying track add', { peer: id });
   pc.onicecandidate = (e) => { if (e.candidate) this.send({ type: 'candidate', candidate: e.candidate, to: id } as any); };
     pc.ontrack = (e) => {
       this.vlog('ontrack', { peer: id, streams: e.streams.length, trackId: e.track.id, kind: e.track.kind, muted: (e as any).track?.muted });
@@ -211,6 +215,8 @@ export class VoiceManager {
     };
     pc.onconnectionstatechange = () => { this.vlog('connectionState', { peer: id, state: pc.connectionState }); };
     this.vlog('created peer', { peer: id });
+  // Ensure we actually have a sending audio track (avoid cases where getUserMedia failed silently)
+  setTimeout(() => this.ensureSendTrack(id), 250);
     // Periodic inbound audio stats (every 5s) for this peer
     const statsInterval = setInterval(async () => {
       if (!this.peers.has(id)) { clearInterval(statsInterval); return; }
@@ -262,6 +268,13 @@ export class VoiceManager {
     switch (msg.type) {
       case 'offer': {
         const pc = this.getOrCreatePeer(from);
+        if (pc.signalingState !== 'stable') {
+          // Glare: both sides created an offer. Rollback and accept remote.
+          try {
+            this.vlog('offer glare detected - rolling back', { from, state: pc.signalingState });
+            await pc.setLocalDescription({ type: 'rollback' } as any);
+          } catch {}
+        }
         await pc.setRemoteDescription(msg.sdp);
         const ans = await pc.createAnswer();
         await pc.setLocalDescription(ans);
@@ -283,6 +296,7 @@ export class VoiceManager {
         await pc.setRemoteDescription(msg.sdp);
         this.patch({ connected: true, connecting: false });
     this.vlog('answer received', { from });
+  this.ensureSendTrack(from);
         // Flush queued ICE
         if (this.pendingIce[from]?.length) {
           const queued = this.pendingIce[from];
@@ -322,6 +336,7 @@ export class VoiceManager {
           this.vlog('metadata fallback peer check', { from, initiator });
           const pc = this.getOrCreatePeer(from);
           if (initiator && pc.signalingState === 'stable') {
+            this.ensureSendTrack(from);
             try { await this.startOffer(from); } catch (e) { this.vlog('offer start error (metadata fallback)', (e as any)?.message); }
           }
         }
@@ -332,6 +347,11 @@ export class VoiceManager {
 
   async startOffer(remoteId: string) {
     const pc = this.getOrCreatePeer(remoteId);
+    if (pc.signalingState !== 'stable') {
+      this.vlog('skip startOffer (not stable)', { to: remoteId, signalingState: pc.signalingState });
+      return;
+    }
+    this.ensureSendTrack(remoteId);
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
   this.send({ type: 'offer', sdp: offer, to: remoteId } as any);
@@ -385,6 +405,18 @@ export class VoiceManager {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(full));
     if (this.channel) this.channel.send({ type: 'broadcast', event: 'signal', payload: full });
   this.vlog('send', { type: (full as any).type, to: (full as any).to });
+  }
+
+  // Ensure an audio track is present for a given peer connection
+  private ensureSendTrack(peerId: string) {
+    const pc = this.peers.get(peerId);
+    if (!pc) return;
+    const hasSender = pc.getSenders().some(s => s.track && s.track.kind === 'audio');
+    const localTrack = this.localStream?.getAudioTracks()[0];
+    if (!hasSender && localTrack) {
+      try { pc.addTrack(localTrack, this.localStream!); this.vlog('ensureSendTrack added', { peer: peerId, trackId: localTrack.id }); } catch (e) { this.vlog('ensureSendTrack error', { peer: peerId, err: (e as any)?.message }); }
+    }
+    if (!localTrack) this.vlog('ensureSendTrack no local audio track', { peer: peerId });
   }
 
   private async hashChannel(lobbyId: string, salt: string) {
