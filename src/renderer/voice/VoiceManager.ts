@@ -34,6 +34,7 @@ export class VoiceManager {
   private negotiationWatchdogs: Record<string, any> = {};
   private candidateStats: Record<string, { count: number; types: Record<string, number>; timer?: any; gathering?: string }> = {};
   private inboundWatchdogs: Record<string, any> = {};
+  private metadataCounts: Record<string, number> = {};
 
   private isInitiator(remoteId: string) {
     // Deterministic ordering rule; if equal (should never) fall back to comparing lengths
@@ -267,6 +268,16 @@ export class VoiceManager {
     this.vlog('created peer', { peer: id });
   // Ensure we actually have a sending audio track (avoid cases where getUserMedia failed silently)
   setTimeout(() => this.ensureSendTrack(id), 250);
+    // If no candidates at all after 4s, attempt ICE restart (maybe network blocked) and renegotiate
+    setTimeout(() => {
+      const stats = this.candidateStats[id];
+      if (!this.peers.has(id)) return; // peer removed
+      if (!stats || stats.count === 0) {
+        this.vlog('no-candidates-timeout', { peer: id, action: 'restartIce+renegotiate' });
+        try { pc.restartIce(); } catch {}
+        this.scheduleNegotiation(id, 'no-candidates-timeout', 150);
+      }
+    }, 4000);
     // Periodic inbound audio stats (every 5s) for this peer
     const statsInterval = setInterval(async () => {
       if (!this.peers.has(id)) { clearInterval(statsInterval); return; }
@@ -417,6 +428,23 @@ export class VoiceManager {
     this.vlog('metadata received', { from, keys: Object.keys(msg).filter(k => !['type','from','to'].includes(k)) });
   // Fallback: attempt negotiation if neither side has exchanged SDP yet
   this.negotiateIfNeeded(from);
+        // Aggressive fallback: count metadata messages; if after N (e.g., 5) still no SDP, force offer even if not initiator
+        const pc = this.getOrCreatePeer(from);
+        this.metadataCounts[from] = (this.metadataCounts[from] || 0) + 1;
+        const haveLocal = !!pc.currentLocalDescription; const haveRemote = !!pc.currentRemoteDescription;
+        if (!haveLocal && !haveRemote && this.metadataCounts[from] === 5) {
+          this.vlog('force-offer-after-metadata-threshold', { from, threshold: 5, initiator: this.isInitiator(from) });
+          if (pc.signalingState === 'stable') {
+            this.ensureSendTrack(from);
+            this.startOffer(from).catch(e => this.vlog('force-offer error', (e as any)?.message));
+          }
+        }
+        // After 10 metadata messages still no SDP -> attempt ICE restart + offer (final fallback)
+        if (!haveLocal && !haveRemote && this.metadataCounts[from] === 10) {
+          this.vlog('final-fallback-restart+offer', { from });
+          try { pc.restartIce(); } catch {}
+          if (pc.signalingState === 'stable') this.startOffer(from).catch(e => this.vlog('final-fallback-offer error', (e as any)?.message));
+        }
         break; }
       case 'leave': { this.removePeer(from); break; }
     }
