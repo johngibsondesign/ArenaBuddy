@@ -27,6 +27,8 @@ jobs:
           npm run typecheck
 
       - name: Build app
+        env:
+          SUPABASE_FUNCTIONS_URL: ${{ secrets.SUPABASE_FUNCTIONS_URL }}
         run: npm run build
 
       - name: Package & Publish (GitHub Releases)
