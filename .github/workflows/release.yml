@@ -1,47 +1,48 @@
-name: Build & Publish Release
+name: Release
 
 on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
 
 jobs:
   release-windows:
     runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+      VITE_TURN_URLS: ${{ secrets.VITE_TURN_URLS }}
+      VITE_TURN_USERNAME: ${{ secrets.VITE_TURN_USERNAME }}
+      VITE_TURN_CREDENTIAL: ${{ secrets.VITE_TURN_CREDENTIAL }}
+      VITE_VOICE_SALT: ${{ secrets.VITE_VOICE_SALT }}
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      SUPABASE_FUNCTIONS_URL: ${{ secrets.SUPABASE_FUNCTIONS_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 0
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
-
       - name: Install deps
         run: npm ci
-
       - name: Lint & Typecheck
         run: |
           npm run lint || echo "Lint warnings"
           npm run typecheck
-
-      - name: Build app
-        env:
-          SUPABASE_FUNCTIONS_URL: ${{ secrets.SUPABASE_FUNCTIONS_URL }}
+      - name: Build (renderer + main)
         run: npm run build
-
       - name: Package & Publish (GitHub Releases)
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          SUPABASE_FUNCTIONS_URL: ${{ secrets.SUPABASE_FUNCTIONS_URL }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
         run: npx electron-builder --win --publish always
-
-      - name: Upload Dist Artifact (debug)
+      - name: Upload build artifacts (debug)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dist-win
+          name: dist
           path: dist
-
-  # Future matrix (mac/linux) targets can be added here.
