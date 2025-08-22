@@ -89,12 +89,12 @@ app.whenReady().then(() => {
     }
     const riotId = match[1].trim();
     const tagLine = match[2].trim();
-    const apiKey = process.env.RIOT_API_KEY;
+  const apiKey = process.env.RIOT_API_KEY;
     if (!apiKey) {
       return { ok: false, error: 'Missing RIOT_API_KEY in .env' };
     }
-    const region = process.env.RIOT_REGION || 'americas';
-    const platform = process.env.RIOT_PLATFORM || 'na1';
+  const region = process.env.RIOT_REGION || 'americas';
+  const platform = process.env.RIOT_PLATFORM || 'na1';
   // Safe debug log (does not output full key)
   const safeKey = apiKey ? `${apiKey.slice(0,5)}…${apiKey.slice(-4)}` : null;
   console.log('[riot:search] env config', { apiKey: safeKey, region, platform });
@@ -164,6 +164,7 @@ app.whenReady().then(() => {
     try { await autoUpdater.downloadUpdate(); return { started: true }; } catch (e: any) { return { error: e.message || 'Download failed' }; }
   });
   ipcMain.handle('app:quitAndInstall', () => { autoUpdater.quitAndInstall(); return { quitting: true }; });
+
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

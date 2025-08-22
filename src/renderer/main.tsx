@@ -315,6 +315,7 @@ const SettingsPage: React.FC = () => {
 	const startDownload = async () => { setError(null); setStatus('starting-download'); const r = await api?.app?.startUpdateDownload(); if (r?.error) { setStatus('error'); setError(r.error); } };
 	const installNow = async () => { await api?.app?.quitAndInstall(); };
 
+
 	return (
 		<div className="flex flex-1 flex-col p-8 text-gray-200 overflow-auto bg-gray-950">
 			<h1 className="text-2xl font-semibold mb-6"><span className="bg-gradient-to-br from-sky-400 to-violet-600 bg-clip-text text-transparent">Settings</span></h1>
