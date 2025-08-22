@@ -283,6 +283,11 @@ export async function getGameflowPhase(): Promise<string|null> { return tryGet('
 export async function getGameflowSession(): Promise<any|null> { return tryGet('/lol-gameflow/v1/session'); }
 export async function getChampSelectSession(): Promise<any|null> { return tryGet('/lol-champ-select/v1/session'); }
 
+export async function getSummonerByPuuid(puuid: string): Promise<any|null> {
+  if (!puuid) return null;
+  return tryGet(`/lol-summoner/v2/summoners/puuid/${encodeURIComponent(puuid)}`);
+}
+
 export function dispose() {
   disposed = true;
   if (pollTimer) clearTimeout(pollTimer);

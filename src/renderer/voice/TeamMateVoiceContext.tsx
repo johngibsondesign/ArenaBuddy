@@ -137,6 +137,13 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
               dlog('Me not found in session players', { myNorm, players: players.map(p => p.gameName + '#' + (p.gameTag||'')) });
             }
         }
+        // NEW: During InProgress we may only have playerChampionSelections (no names). We can fetch names via summoner API if needed later.
+        if (!teammate && phaseStr === 'InProgress' && session?.gameData?.playerChampionSelections && Array.isArray(session.gameData.playerChampionSelections)) {
+          const selections = session.gameData.playerChampionSelections as any[];
+          // We only consider duo if exactly 2 unique puuids on my team after enrichment (future: fetch names lazily)
+          // Store puuids for potential future expansion logic (not connecting due to missing names yet)
+          dlog('InProgress selections detected', { count: selections.length, sample: selections.slice(0,3).map(s => ({ champ: s.championId, puuid: (s.puuid||'').slice(0,8) })) });
+        }
         // Additional attempt: some builds may expose players at session.gameData.gameData?.players or session.players
         if (!teammate && session) {
           const playerArrays: any[] = [];
