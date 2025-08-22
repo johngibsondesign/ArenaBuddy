@@ -63,8 +63,9 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
         let phaseStr = typeof phase === 'string' ? phase : undefined;
         let teammate: { gameName: string; tagLine?: string } | null = null;
         // Fallback: if we appear to be in-game but session.players missing (opening mid-match), use Live Client Data port 2999
-        let liveData: any = null;
-        if (!lobby?.members?.length && (!session || !session?.gameData?.players?.length) && (phaseStr === 'InProgress' || phaseStr === 'ChampSelect' || phaseStr === undefined)) {
+  let liveData: any = null;
+  // Fetch Live Client data if we have no lobby OR no concrete player roster (only champion selections) while in/entering game
+  if ((!lobby?.members?.length || !(session?.gameData?.players?.length)) && (phaseStr === 'InProgress' || phaseStr === 'ChampSelect' || phaseStr === undefined)) {
           try {
             liveData = await api.getLiveGameData?.();
             if (liveData?.allPlayers && Array.isArray(liveData.allPlayers)) {
@@ -347,6 +348,28 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
                 } else {
                   teammate = { gameName: mates[0].summonerName, tagLine: mates[0].gameTag || mates[0].tagLine };
                   dlog('Teammate heuristically chosen from 2 side members (arena heuristic basic)');
+                }
+              } else if (mates.length > 2) {
+                // Use name similarity (Levenshtein) to pick closest name if there is a clear winner
+                const base = myNorm;
+                const dist = (a: string, b: string) => {
+                  a = a.toLowerCase(); b = b.toLowerCase();
+                  const dp = Array.from({length: a.length+1}, () => new Array(b.length+1).fill(0));
+                  for (let i=0;i<=a.length;i++) dp[i][0]=i; for (let j=0;j<=b.length;j++) dp[0][j]=j;
+                  for (let i=1;i<=a.length;i++) for (let j=1;j<=b.length;j++) {
+                    const cost = a[i-1]===b[j-1]?0:1;
+                    dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+cost);
+                  }
+                  return dp[a.length][b.length];
+                };
+                const scored = mates.map(m => ({ m, d: dist(base, norm(m.summonerName)) }));
+                scored.sort((a,b)=>a.d-b.d);
+                if (scored.length && (scored.length===1 || (scored[0].d + 2 <= scored[1].d))) {
+                  const pick = scored[0].m;
+                  teammate = { gameName: pick.summonerName, tagLine: pick.gameTag || pick.tagLine };
+                  dlog('Teammate chosen via name similarity heuristic', { candidate: pick.summonerName, distance: scored[0].d, nextDist: scored[1]?.d });
+                } else {
+                  dlog('Name similarity heuristic ambiguous', { scored: scored.slice(0,4).map(s => ({ name: s.m.summonerName, d: s.d })) });
                 }
               } else if (mates.length > 2) {
                 dlog('LiveClient fallback ambiguous (skipping)', { count: mates.length });
