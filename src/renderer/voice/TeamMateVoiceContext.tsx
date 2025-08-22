@@ -114,7 +114,27 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
               const side = mePlayer.teamType; // BLUE / RED
               const teamMates = players.filter(p => p.teamType === side && norm(p.gameName) !== myNorm);
               if (teamMates.length === 1) teammate = { gameName: teamMates[0].gameName, tagLine: teamMates[0].gameTag }; // duo inside ranked flex/arena scenario
+              else {
+                dlog('Session teammate resolution ambiguous', {
+                  me: mePlayer.gameName + '#' + (mePlayer.gameTag || ''),
+                  side,
+                  teamMateCount: teamMates.length,
+                  teamMates: teamMates.map(t => ({ name: t.gameName + '#' + (t.gameTag||''), puuid: (t.puuid||'').slice(0,8), teamType: t.teamType })),
+                  allPlayers: players.map(p => ({ name: p.gameName + '#' + (p.gameTag||''), puuid: (p.puuid||'').slice(0,8), teamType: p.teamType }))
+                });
+              }
+            } else {
+              dlog('Me not found in session players', { myNorm, players: players.map(p => p.gameName + '#' + (p.gameTag||'')) });
             }
+        }
+        if (!teammate) {
+          if (lobby?.members?.length) {
+            dlog('No teammate determined after lobby + session inspection', { lobbyCount: lobby.members.length });
+          } else if (session?.gameData?.players?.length) {
+            dlog('No teammate determined from session players only', { playerCount: session.gameData.players.length });
+          } else {
+            dlog('No teammate data sources available (no lobby, no session players)');
+          }
         }
         setState(s => ({ ...s, teammateRiotId: teammate?.gameName, teammateTagLine: teammate?.tagLine, phase: phaseStr, inGame: phaseStr === 'InProgress' }));
   dlog('state updated', { teammate: teammate ? teammate.gameName + '#' + (teammate.tagLine||'') : null, phase: phaseStr });
