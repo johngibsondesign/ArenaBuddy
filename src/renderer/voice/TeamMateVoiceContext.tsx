@@ -32,6 +32,7 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
   const lastLobbyMembersRef = React.useRef<string[]>([]);
   const debugEnabledRef = React.useRef<boolean>(false);
   const teammatePuuidRef = React.useRef<string | null>(null);
+  const prevTeammateRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     debugEnabledRef.current = localStorage.getItem('voice.debugLobby') === '1';
@@ -138,6 +139,20 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
         }
         setState(s => ({ ...s, teammateRiotId: teammate?.gameName, teammateTagLine: teammate?.tagLine, phase: phaseStr, inGame: phaseStr === 'InProgress' }));
   dlog('state updated', { teammate: teammate ? teammate.gameName + '#' + (teammate.tagLine||'') : null, phase: phaseStr });
+
+        // New teammate appeared while staying in same phase (e.g., already in Lobby)
+        if (!voice.state.connected && !voice.state.connecting && voice.autoConnectInGame && teammate?.gameName && !prevTeammateRef.current) {
+          let lobbyId: string;
+          if (teammatePuuidRef.current && me?.puuid) {
+            const pair = [teammatePuuidRef.current, me.puuid].sort();
+            lobbyId = 'duo_' + pair.map(p => p.slice(0,12)).join('__');
+          } else {
+            lobbyId = duoChannelId(teammate.gameName, teammate.tagLine, me?.riotId?.split('#')[0], me?.tagLine);
+          }
+          dlog('Attempt connect (TeammateAppeared)', { lobbyId, teammate: teammate.gameName + '#' + (teammate.tagLine||''), me: me?.riotId + '#' + (me?.tagLine||''), phase: phaseStr });
+          voice.connect(lobbyId, 'supabase://voice', { name: me?.riotId, iconId: me?.profileIconId, riotId: me?.riotId, tagLine: me?.tagLine } as any);
+        }
+        prevTeammateRef.current = teammate?.gameName || null;
 
         // Voice lifecycle logic
         if (phaseStr && phaseStr !== lastPhaseRef.current) {
