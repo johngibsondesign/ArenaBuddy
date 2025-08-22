@@ -190,7 +190,12 @@ export class VoiceManager {
     const pc = new RTCPeerConnection(rtcConfig); this.peers.set(id, pc);
     if (this.localStream) this.localStream.getTracks().forEach(t => pc.addTrack(t, this.localStream!));
   pc.onicecandidate = (e) => { if (e.candidate) this.send({ type: 'candidate', candidate: e.candidate, to: id } as any); };
-    pc.ontrack = (e) => this.attachStream(id, e.streams[0]);
+    pc.ontrack = (e) => {
+      this.vlog('ontrack', { peer: id, streams: e.streams.length, trackId: e.track.id, kind: e.track.kind, muted: (e as any).track?.muted });
+      this.attachStream(id, e.streams[0]);
+    };
+    pc.onnegotiationneeded = () => { this.vlog('negotiationneeded', { peer: id, signalingState: pc.signalingState }); };
+    pc.onsignalingstatechange = () => { this.vlog('signalingState', { peer: id, state: pc.signalingState }); };
     pc.oniceconnectionstatechange = () => {
       const st = pc.iceConnectionState;
       this.vlog('iceConnectionState', { peer: id, state: st });
@@ -205,6 +210,16 @@ export class VoiceManager {
     };
     pc.onconnectionstatechange = () => { this.vlog('connectionState', { peer: id, state: pc.connectionState }); };
     this.vlog('created peer', { peer: id });
+    // Periodic inbound audio stats (every 5s) for this peer
+    const statsInterval = setInterval(async () => {
+      if (!this.peers.has(id)) { clearInterval(statsInterval); return; }
+      try {
+        const stats = await pc.getStats();
+        let audio: any = null;
+        stats.forEach(r => { if (r.type === 'inbound-rtp' && r.kind === 'audio') audio = r; });
+        if (audio) this.vlog('inbound-audio-stats', { peer: id, bytes: audio.bytesReceived, packets: audio.packetsReceived, jitter: audio.jitter, packetsLost: audio.packetsLost });
+      } catch {}
+    }, 5000);
     return pc;
   }
 
@@ -213,7 +228,29 @@ export class VoiceManager {
     if (!participant) { participant = { id } as PeerParticipant; this.state.participants.push(participant); }
     participant.stream = stream;
     let el: HTMLAudioElement | undefined = (participant as any)._el;
-    if (!el) { el = new Audio(); el.autoplay = true; el.srcObject = stream; el.volume = (participant.volume ?? 1) * this.outputGain; (participant as any)._el = el; if (this.outputDeviceId && (el as any).setSinkId) { try { (el as any).setSinkId(this.outputDeviceId); } catch {} } }
+    if (!el) {
+      el = new Audio();
+      el.autoplay = true;
+  try { el.setAttribute('playsinline', 'true'); } catch {}
+      el.srcObject = stream;
+      el.volume = (participant.volume ?? 1) * this.outputGain;
+      (participant as any)._el = el;
+      if (this.outputDeviceId && (el as any).setSinkId) { try { (el as any).setSinkId(this.outputDeviceId); } catch {} }
+      const playAttempt = () => {
+        const p = el!.play();
+        if (p && typeof p.then === 'function') {
+          p.then(() => { this.vlog('audio play ok', { peer: id }); })
+           .catch(err => { this.vlog('audio play blocked', { peer: id, err: err?.message }); });
+        }
+      };
+      // Delay slightly to ensure track is ready
+      setTimeout(playAttempt, 50);
+    }
+    // Log track settings
+    try {
+      const audioTracks = stream.getAudioTracks();
+      audioTracks.forEach(t => this.vlog('remote track info', { peer: id, id: t.id, enabled: t.enabled, muted: (t as any).muted, readyState: (t as any).readyState, settings: (t as any).getSettings?.() }));
+    } catch {}
     this.emit();
   }
 
@@ -272,6 +309,7 @@ export class VoiceManager {
     await pc.setLocalDescription(offer);
   this.send({ type: 'offer', sdp: offer, to: remoteId } as any);
   this.vlog('offer sent', { to: remoteId });
+  try { this.vlog('localDescription', { type: pc.localDescription?.type, sdpLen: pc.localDescription?.sdp?.length }); } catch {}
   }
 
   mute(m: boolean) {
