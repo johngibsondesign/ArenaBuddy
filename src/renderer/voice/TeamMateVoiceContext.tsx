@@ -33,6 +33,8 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
   const debugEnabledRef = React.useRef<boolean>(false);
   const teammatePuuidRef = React.useRef<string | null>(null);
   const prevTeammateRef = React.useRef<string | null>(null);
+  const puuidCacheRef = React.useRef<Record<string, { gameName?: string; tagLine?: string; fetched: number }>>({});
+  const lastSelectionResolveRef = React.useRef<number>(0);
 
   React.useEffect(() => {
     debugEnabledRef.current = localStorage.getItem('voice.debugLobby') === '1';
@@ -140,9 +142,37 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
         // NEW: During InProgress we may only have playerChampionSelections (no names). We can fetch names via summoner API if needed later.
         if (!teammate && phaseStr === 'InProgress' && session?.gameData?.playerChampionSelections && Array.isArray(session.gameData.playerChampionSelections)) {
           const selections = session.gameData.playerChampionSelections as any[];
-          // We only consider duo if exactly 2 unique puuids on my team after enrichment (future: fetch names lazily)
-          // Store puuids for potential future expansion logic (not connecting due to missing names yet)
           dlog('InProgress selections detected', { count: selections.length, sample: selections.slice(0,3).map(s => ({ champ: s.championId, puuid: (s.puuid||'').slice(0,8) })) });
+          // Attempt lightweight enrichment every 15s max to avoid hammering LCU
+          const now = Date.now();
+          if (now - lastSelectionResolveRef.current > 15000) {
+            lastSelectionResolveRef.current = now;
+            // Unique PUUIDs
+            const puuids = Array.from(new Set(selections.map(s => s.puuid).filter(Boolean)));
+            const cache = puuidCacheRef.current;
+            const toFetch = puuids.filter(p => !cache[p] || (now - cache[p].fetched) > 5*60*1000).slice(0,5); // cap per cycle
+            if (toFetch.length) dlog('Fetching summoners for puuids', toFetch.map(p => p.slice(0,8)));
+            for (const p of toFetch) {
+              try {
+                const info = await api.getSummonerByPuuid(p);
+                cache[p] = { gameName: info?.gameName || info?.displayName, tagLine: info?.tagLine, fetched: Date.now() };
+              } catch {/* ignore */}
+            }
+            // Determine my puuid (from me) and find exactly one teammate on same team if possible
+            if (me?.puuid) {
+              // Need to know sides: playerChampionSelections doesn't include team directly; attempt inference via champion duplicates? Skip if not determinable.
+              // Fallback: if exactly 2 cached entries including me (duo in Arena) pick the other.
+              if (puuids.includes(me.puuid) && puuids.length === 2) {
+                const other = puuids.find(p => p !== me.puuid)!;
+                const otherInfo = cache[other];
+                if (otherInfo?.gameName) {
+                  teammate = { gameName: otherInfo.gameName, tagLine: otherInfo.tagLine };
+                  teammatePuuidRef.current = other;
+                  dlog('Teammate inferred from champion selections duo', { other: other.slice(0,8), name: otherInfo.gameName + '#' + (otherInfo.tagLine||'') });
+                }
+              }
+            }
+          }
         }
         // Additional attempt: some builds may expose players at session.gameData.gameData?.players or session.players
         if (!teammate && session) {

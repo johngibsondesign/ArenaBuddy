@@ -19,6 +19,7 @@ try { ipcMain.removeHandler('lcu:getLobby'); } catch {}
 try { ipcMain.removeHandler('lcu:getGameflowPhase'); } catch {}
 try { ipcMain.removeHandler('lcu:getGameflowSession'); } catch {}
 try { ipcMain.removeHandler('lcu:getChampSelectSession'); } catch {}
+try { ipcMain.removeHandler('lcu:getSummonerByPuuid'); } catch {}
 ipcMain.handle('lcu:isDetected', () => ({ detected: lcu.getStatus() === 'UP' }));
 ipcMain.handle('lcu:getCurrentSummoner', async () => {
   if (lcu.getStatus() !== 'UP') return null;
@@ -57,6 +58,7 @@ ipcMain.handle('lcu:getLobby', () => lcu.getLobby());
 ipcMain.handle('lcu:getGameflowPhase', () => lcu.getGameflowPhase());
 ipcMain.handle('lcu:getGameflowSession', () => lcu.getGameflowSession());
 ipcMain.handle('lcu:getChampSelectSession', () => lcu.getChampSelectSession());
+ipcMain.handle('lcu:getSummonerByPuuid', (_evt, puuid: string) => lcu.getSummonerByPuuid(puuid));
 
 // Raw debug fetch of underlying endpoints
 ipcMain.handle('lcu:debugRawUser', async () => {
