@@ -3,8 +3,15 @@ name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*'
+    branches:
+      - main
   workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+  packages: read
 
 jobs:
   release-windows:
