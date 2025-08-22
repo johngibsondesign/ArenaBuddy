@@ -35,6 +35,9 @@ export class VoiceManager {
   private candidateStats: Record<string, { count: number; types: Record<string, number>; timer?: any; gathering?: string }> = {};
   private inboundWatchdogs: Record<string, any> = {};
   private metadataCounts: Record<string, number> = {};
+  private discoveredPeers: Set<string> = new Set();
+  private primaryRemote?: string; // chosen 1:1 remote peer id
+  private signalQueue: any[] = []; // directed signals queued until we know remote id
 
   private isInitiator(remoteId: string) {
     // Deterministic ordering rule; if equal (should never) fall back to comparing lengths
@@ -201,6 +204,12 @@ export class VoiceManager {
             // Still schedule a watchdog in case remote never sends an offer
             this.scheduleNegotiation(r, 'presence-watchdog', 1200);
           }
+          // Choose a primary remote peer if we don't have one yet (1:1 assumption)
+          if (!this.primaryRemote) {
+            this.primaryRemote = r;
+            this.vlog('primaryRemote set', { peer: r });
+            this.flushQueuedSignals();
+          }
         }
       });
       this.presenceSet = newSet;
@@ -348,6 +357,7 @@ export class VoiceManager {
   private async handleSignal(msg: any) {
     const from = msg.from || 'remote';
   if (msg.to && msg.to !== this.selfId) return; // directed elsewhere
+  if (from === this.selfId) { this.vlog('ignore self signal', { type: msg.type }); return; }
   this.vlog('handleSignal', { type: msg.type, from, to: msg.to });
     switch (msg.type) {
       case 'offer': {
@@ -428,6 +438,12 @@ export class VoiceManager {
     this.vlog('metadata received', { from, keys: Object.keys(msg).filter(k => !['type','from','to'].includes(k)) });
   // Fallback: attempt negotiation if neither side has exchanged SDP yet
   this.negotiateIfNeeded(from);
+        // Discover remote peer id & flush queued signals if first time
+        if (!this.discoveredPeers.has(from)) {
+          this.discoveredPeers.add(from);
+          if (!this.primaryRemote) { this.primaryRemote = from; this.vlog('primaryRemote set (metadata)', { peer: from }); }
+          this.flushQueuedSignals();
+        }
         // Aggressive fallback: count metadata messages; if after N (e.g., 5) still no SDP, force offer even if not initiator
         const pc = this.getOrCreatePeer(from);
         this.metadataCounts[from] = (this.metadataCounts[from] || 0) + 1;
@@ -508,6 +524,16 @@ export class VoiceManager {
 
   private send(msg: Partial<SignalingMessage>) {
     const full = { ...msg, from: this.selfId } as any;
+    // Auto-target directed signaling if missing 'to'
+    if ((full.type === 'offer' || full.type === 'answer' || full.type === 'candidate') && !full.to) {
+      if (this.primaryRemote) {
+        full.to = this.primaryRemote;
+      } else {
+        this.vlog('queue directed signal (no primaryRemote yet)', { type: full.type });
+        this.signalQueue.push(full);
+        return;
+      }
+    }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(full));
     if (this.channel) this.channel.send({ type: 'broadcast', event: 'signal', payload: full });
   this.vlog('send', { type: (full as any).type, to: (full as any).to });
@@ -621,6 +647,14 @@ export class VoiceManager {
     const cs = this.candidateStats[peer]; if (!cs) return;
     if (cs.timer) { clearTimeout(cs.timer); cs.timer = null; }
     this.vlog('candidate-summary', { peer, reason, count: cs.count, types: cs.types, gathering: cs.gathering });
+  }
+
+  private flushQueuedSignals() {
+    if (!this.primaryRemote || !this.signalQueue.length) return;
+    const peer = this.primaryRemote;
+    this.vlog('flushQueuedSignals', { count: this.signalQueue.length, peer });
+    const queued = this.signalQueue.splice(0);
+    queued.forEach(m => { m.to = peer; this.send(m); });
   }
 }
 
