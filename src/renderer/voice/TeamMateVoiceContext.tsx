@@ -58,6 +58,15 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
   dlog('poll start', { ts: Date.now(), prevPhase: lastPhaseRef.current });
         const phaseStr = typeof phase === 'string' ? phase : undefined;
         let teammate: { gameName: string; tagLine?: string } | null = null;
+        // Manual override (developer/debug) e.g. localStorage.setItem('voice.manualTeammate','Name#TAG')
+        try {
+          const manual = localStorage.getItem('voice.manualTeammate');
+          if (manual && /.+#.+/.test(manual)) {
+            const [mn, mt] = manual.split('#');
+            teammate = { gameName: mn, tagLine: mt };
+            dlog('Manual teammate override applied', manual);
+          }
+        } catch {}
         // From lobby
         const selfNames: string[] = [];
         if (me?.riotId) selfNames.push(me.riotId.split('#')[0]);
@@ -128,13 +137,32 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
               dlog('Me not found in session players', { myNorm, players: players.map(p => p.gameName + '#' + (p.gameTag||'')) });
             }
         }
+        // Additional attempt: some builds may expose players at session.gameData.gameData?.players or session.players
+        if (!teammate && session) {
+          const playerArrays: any[] = [];
+          if (Array.isArray((session as any).players)) playerArrays.push((session as any).players);
+          if (session?.gameData?.gameData?.players && Array.isArray(session.gameData.gameData.players)) playerArrays.push(session.gameData.gameData.players);
+          for (const arr of playerArrays) {
+            try {
+              const myNorm = norm(me?.riotId?.split('#')[0]);
+              const mePlayer = arr.find((p: any) => norm(p.gameName) === myNorm);
+              if (mePlayer) {
+                const side = mePlayer.teamType || mePlayer.team || mePlayer.side;
+                const mates = arr.filter((p: any) => (p.teamType||p.team||p.side) === side && norm(p.gameName) !== myNorm);
+                if (mates.length === 1) { teammate = { gameName: mates[0].gameName, tagLine: mates[0].gameTag }; dlog('Teammate found via alt players array'); break; }
+              }
+            } catch {}
+          }
+        }
         if (!teammate) {
+          const sessionKeys = session ? Object.keys(session) : [];
           if (lobby?.members?.length) {
-            dlog('No teammate determined after lobby + session inspection', { lobbyCount: lobby.members.length });
+            dlog('No teammate determined after lobby + session inspection', { lobbyCount: lobby.members.length, sessionKeys });
           } else if (session?.gameData?.players?.length) {
-            dlog('No teammate determined from session players only', { playerCount: session.gameData.players.length });
+            dlog('No teammate determined from session players only', { playerCount: session.gameData.players.length, sessionKeys });
           } else {
-            dlog('No teammate data sources available (no lobby, no session players)');
+            dlog('No teammate data sources available (no lobby, no session players)', { sessionKeys });
+            if (session && !session?.gameData?.players) dlog('Raw session snapshot (truncated)', JSON.stringify(session).slice(0, 400));
           }
         }
         setState(s => ({ ...s, teammateRiotId: teammate?.gameName, teammateTagLine: teammate?.tagLine, phase: phaseStr, inGame: phaseStr === 'InProgress' }));
