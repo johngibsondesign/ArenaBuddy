@@ -183,18 +183,15 @@ app.whenReady().then(() => {
   // Use electron-updater for unified update check
   ipcMain.handle('app:checkForUpdate', async () => {
     try {
-      console.log('[update] manual check start', { current: app.getVersion() });
       const r = await autoUpdater.checkForUpdates();
       if (!r) return { current: app.getVersion(), hasUpdate: false };
       const latest = r.updateInfo.version;
       const current = app.getVersion();
       const hasUpdate = compareSemver(current, latest) < 0;
-      console.log('[update] primary result', { current, latest, hasUpdate });
       return { current, latest, hasUpdate, release: r.updateInfo };
     } catch (e: any) {
       // Fallback: parse Atom feed for latest tag if GitHub API returns 406 / parsing issue
       const msg = e?.message || '';
-      console.warn('[update] primary check error', msg);
       if (/406/.test(msg) || /Unable to find latest version/i.test(msg)) {
         try {
           const feedRes = await fetch('https://github.com/johngibsondesign/ArenaBuddy/releases.atom', { headers: { 'Accept': 'application/atom+xml,application/xml' } });
@@ -204,31 +201,11 @@ app.whenReady().then(() => {
             const latest = m[1].replace(/^v/, '');
             const current = app.getVersion();
             const hasUpdate = compareSemver(current, latest) < 0;
-            console.log('[update] atom fallback', { current, latest, hasUpdate });
             return { current, latest, hasUpdate, fallback: true };
           }
         } catch (fe) {
           return { error: msg, fallbackError: (fe as any)?.message };
         }
-      }
-      // Secondary fallback: GitHub API
-      try {
-        const apiRes = await fetch('https://api.github.com/repos/johngibsondesign/ArenaBuddy/releases/latest', { headers: { 'Accept': 'application/vnd.github+json' } });
-        if (apiRes.ok) {
-          const json: any = await apiRes.json();
-          let tag = json.tag_name || json.name;
-          if (tag) {
-            tag = tag.replace(/^v/, '');
-            const current = app.getVersion();
-            const hasUpdate = compareSemver(current, tag) < 0;
-            console.log('[update] github api fallback', { current, latest: tag, hasUpdate });
-            return { current, latest: tag, hasUpdate, apiFallback: true };
-          }
-        } else {
-          console.warn('[update] github api fallback status', apiRes.status);
-        }
-      } catch (gerr: any) {
-        console.warn('[update] github api fallback error', gerr?.message);
       }
       return { error: msg || 'Update check failed' };
     }
