@@ -1,6 +1,6 @@
 ﻿{
     "name":  "arena-buddy",
-    "version":  "0.1.9",
+    "version":  "0.1.10",
     "private":  true,
     "main":  "dist/main/main.js",
     "description":  "ArenaBuddy - Electron + React + Tailwind starter",
@@ -12,6 +12,7 @@
                     "dev:electron":  "wait-on dist/main/main.js dist/main/preload.js \u0026\u0026 electron dist/main/main.js",
                     "dev:renderer":  "vite",
                     "dev:tailwind":  "tailwindcss -i ./src/renderer/index.css -o ./src/renderer/output.css --watch",
+                    "prebuild": "node scripts/check-bom.js",
                     "build":  "npm run build:tailwind \u0026\u0026 vite build \u0026\u0026 npm run build:generated \u0026\u0026 npm run build:main",
                     "build:generated":  "node scripts/embed-supabase-url.js",
                     "build:tailwind":  "tailwindcss -i ./src/renderer/index.css -o ./src/renderer/output.css --minify",
