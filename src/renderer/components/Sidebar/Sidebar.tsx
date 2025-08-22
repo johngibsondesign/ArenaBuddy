@@ -3,9 +3,10 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faHouse, faChessKnight, faGear } from '@fortawesome/free-solid-svg-icons';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useSummoner } from '../../summoner/SummonerContext';
-import { VoiceBar } from '../VoiceBar/VoiceBar';
+// import { VoiceBar } from '../VoiceBar/VoiceBar';
 import { useDataDragon } from '../../ddragon/DataDragonContext';
 import { useVoice } from '../../voice/VoiceContext';
+import { faPhoneSlash, faPhone, faMicrophone, faMicrophoneSlash, faHeadphones, faHeadphonesSimple } from '@fortawesome/free-solid-svg-icons';
 
 export const Sidebar: React.FC = () => {
   const { me } = useSummoner();
@@ -61,15 +62,56 @@ export const Sidebar: React.FC = () => {
             </NavLink>
           </nav>
         </div>
-        {lcuDetected && (
-          <div className="mt-4 flex justify-center">
-            <div className="flex flex-col items-center gap-2">
-              <VoiceBar variant="minimal" />
-            </div>
-          </div>
-        )}
+  {/* Voice controls moved to bottom section */}
       </div>
       <div className="flex flex-col items-center justify-center mt-2 gap-3">
+        {lcuDetected && (
+          <div className="flex flex-col items-center gap-2 pb-2 border-b border-gray-800 w-full">
+            {!voice.state.connected && !voice.state.connecting && (
+              <button
+                onClick={() => {
+                  const riot = me?.riotId || 'You';
+                  const base = riot.split('#')[0];
+                  const tag = (me?.tagLine || riot.split('#')[1] || 'NA1').toUpperCase();
+                  const lobbyId = base ? `${base.replace(/[^A-Za-z0-9_-]/g,'')}_${tag}` : 'default';
+                  voice.connect(lobbyId, 'supabase://voice', { name: riot, iconId: me?.profileIconId, riotId: me?.riotId, tagLine: me?.tagLine });
+                }}
+                className="flex items-center justify-center size-10 rounded-md bg-emerald-600/80 hover:bg-emerald-500 text-white shadow border border-emerald-400/40"
+                title="Join Voice"
+              >
+                <FontAwesomeIcon icon={faPhone} className="text-lg" />
+              </button>
+            )}
+            {voice.state.connecting && (
+              <div className="size-10 grid place-content-center text-[10px] rounded-md bg-sky-600/30 text-sky-300 border border-sky-500/40 animate-pulse">…</div>
+            )}
+            {voice.state.connected && (
+              <div className="flex flex-col items-center gap-2">
+                <button
+                  onClick={() => voice.mute(!voice.state.muted)}
+                  className={`flex items-center justify-center size-10 rounded-md border transition ${voice.state.muted ? 'bg-red-600/80 border-red-500/60 text-white' : 'bg-gray-800/70 border-gray-700 text-gray-200 hover:bg-gray-700'}`}
+                  title={voice.state.muted ? 'Unmute' : 'Mute'}
+                >
+                  <FontAwesomeIcon icon={voice.state.muted ? faMicrophoneSlash : faMicrophone} className="text-lg" />
+                </button>
+                <button
+                  onClick={() => voice.deafen(!voice.state.deafened)}
+                  className={`flex items-center justify-center size-10 rounded-md border transition ${voice.state.deafened ? 'bg-red-600/80 border-red-500/60 text-white' : 'bg-gray-800/70 border-gray-700 text-gray-200 hover:bg-gray-700'}`}
+                  title={voice.state.deafened ? 'Undeafen' : 'Deafen'}
+                >
+                  <FontAwesomeIcon icon={voice.state.deafened ? faHeadphonesSimple : faHeadphones} className="text-lg" />
+                </button>
+                <button
+                  onClick={() => voice.leave()}
+                  className="flex items-center justify-center size-10 rounded-md bg-red-600/80 hover:bg-red-500 text-white shadow border border-red-500/60"
+                  title="Leave Voice"
+                >
+                  <FontAwesomeIcon icon={faPhoneSlash} className="text-lg" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         {remotes.map(remote => (
           <div key={remote.id} className={`relative ${remote.speaking ? 'ring-2 ring-emerald-500/70 rounded-lg animate-pulse' : ''} ${remote.muted ? 'outline outline-2 outline-red-600 rounded-lg' : ''}`}>
             <button

@@ -50,16 +50,35 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
   React.useEffect(() => {
     const api: any = (window as any).api?.lcu;
     if (!api) return;
+    const bootstrapAttemptsRef = { count: 0, max: 8 } as any; // rapid early polls
     async function poll() {
       try {
-        const [phase, lobby, session] = await Promise.all([
+        const [phase, lobby, session, champSel] = await Promise.all([
           api.getGameflowPhase(),
           api.getLobby(),
-          api.getGameflowSession()
+          api.getGameflowSession(),
+          api.getChampSelectSession?.()
         ]);
-  dlog('poll start', { ts: Date.now(), prevPhase: lastPhaseRef.current });
-        const phaseStr = typeof phase === 'string' ? phase : undefined;
+        dlog('poll start', { ts: Date.now(), prevPhase: lastPhaseRef.current });
+        let phaseStr = typeof phase === 'string' ? phase : undefined;
         let teammate: { gameName: string; tagLine?: string } | null = null;
+        // Fallback: if we appear to be in-game but session.players missing (opening mid-match), use Live Client Data port 2999
+        let liveData: any = null;
+        if (!lobby?.members?.length && (!session || !session?.gameData?.players?.length) && (phaseStr === 'InProgress' || phaseStr === 'ChampSelect' || phaseStr === undefined)) {
+          try {
+            liveData = await api.getLiveGameData?.();
+            if (liveData?.allPlayers && Array.isArray(liveData.allPlayers)) {
+              dlog('LiveClient fallback players', liveData.allPlayers.map((p: any) => p.summonerName));
+            }
+            if (!liveData && api.getLivePlayerList) {
+              const list = await api.getLivePlayerList();
+              if (Array.isArray(list)) {
+                liveData = { allPlayers: list.map((p: any) => ({ summonerName: p.summonerName, team: p.team, raw: p })) };
+                dlog('LiveClient playerlist used (no allgamedata)', list.length);
+              }
+            }
+          } catch {/* ignore */}
+        }
         // Manual override (developer/debug) e.g. localStorage.setItem('voice.manualTeammate','Name#TAG')
         try {
           const manual = localStorage.getItem('voice.manualTeammate');
@@ -69,7 +88,7 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
             dlog('Manual teammate override applied', manual);
           }
         } catch {}
-        // From lobby
+  // From lobby
         const selfNames: string[] = [];
         if (me?.riotId) selfNames.push(me.riotId.split('#')[0]);
         if (me?.displayName) selfNames.push(me.displayName);
@@ -117,7 +136,7 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
           }
         }
         // From game session (post champ select / in game)
-        if (!teammate && session?.gameData?.players) {
+  if (!teammate && session?.gameData?.players) {
           const myNorm = norm(me?.riotId?.split('#')[0]);
           const players = session.gameData.players as any[];
           // Side with me
@@ -173,7 +192,81 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
               }
             }
           }
+          // Additional Arena heuristic: array ordering pairs (0,1)(2,3)... choose adjacent entry as partner
+          if (!teammate && me?.puuid) {
+            const idx = selections.findIndex(s => s.puuid === me.puuid);
+            if (idx !== -1) {
+              const pairIdx = idx % 2 === 0 ? idx + 1 : idx - 1;
+              if (pairIdx >= 0 && pairIdx < selections.length) {
+                const partner = selections[pairIdx];
+                if (partner?.puuid && partner.puuid !== me.puuid) {
+                  const cache = puuidCacheRef.current;
+                  const pc = cache[partner.puuid];
+                  if (pc?.gameName) {
+                    teammate = { gameName: pc.gameName, tagLine: pc.tagLine };
+                    teammatePuuidRef.current = partner.puuid;
+                    dlog('Teammate resolved via ordering heuristic', { idx, pairIdx, partner: partner.puuid.slice(0,8), name: pc.gameName + '#' + (pc.tagLine||'') });
+                  } else {
+                    // fetch immediately (one-off) if not cached
+                    try {
+                      const info = await api.getSummonerByPuuid(partner.puuid);
+                      if (info?.gameName) {
+                        puuidCacheRef.current[partner.puuid] = { gameName: info.gameName, tagLine: info.tagLine, fetched: Date.now() };
+                        teammate = { gameName: info.gameName, tagLine: info.tagLine };
+                        teammatePuuidRef.current = partner.puuid;
+                        dlog('Teammate fetched via ordering heuristic lookup', { idx, pairIdx, partner: partner.puuid.slice(0,8), name: info.gameName + '#' + (info.tagLine||'') });
+                      }
+                    } catch {/* ignore */}
+                  }
+                }
+              } else {
+                dlog('Ordering heuristic pair index out of range', { idx, pairIdx });
+              }
+            } else {
+              dlog('Ordering heuristic: self not found in selections');
+            }
+          }
         }
+        // Champ Select session (covers mid-launch inside champ select or early game where session players missing)
+        if (!teammate && champSel?.myTeam && Array.isArray(champSel.myTeam)) {
+          try {
+            const myNorm = norm(me?.riotId?.split('#')[0]);
+            const teamArr = champSel.myTeam as any[]; // entries may include summonerId, puuid, championId, cellId, assignedPosition
+            // Log keys for diagnostics once
+            if (debugEnabledRef.current && teamArr.length) {
+              const sample = teamArr[0];
+              dlog('ChampSelect myTeam sample keys', Object.keys(sample));
+            }
+            // Attempt to find me by puuid first
+            let mine = teamArr.find(p => me?.puuid && p.puuid === me.puuid);
+            if (!mine) mine = teamArr.find(p => myNorm && norm(p.displayName || p.gameName || p.summonerName || p.name) === myNorm);
+            if (mine) {
+              const others = teamArr.filter(p => p !== mine);
+              if (others.length === 1) {
+                const o = others[0];
+                teammate = { gameName: o.gameName || o.displayName || o.summonerName || o.name, tagLine: o.tagLine || o.gameTag };
+                teammatePuuidRef.current = o.puuid || null;
+                dlog('Teammate resolved via ChampSelect myTeam');
+              } else if (others.length > 1) {
+                // Arena may show all 8; try grouping by cellId parity (arena pairs often adjacent) as heuristic
+                const mineCell = mine.cellId ?? mine.pickCellId;
+                if (typeof mineCell === 'number') {
+                  const candidate = others.find(o => Math.abs((o.cellId ?? o.pickCellId) - mineCell) === 1);
+                  if (candidate) {
+                    teammate = { gameName: candidate.gameName || candidate.displayName || candidate.summonerName || candidate.name, tagLine: candidate.tagLine || candidate.gameTag };
+                    teammatePuuidRef.current = candidate.puuid || null;
+                    dlog('Teammate heuristically chosen via ChampSelect adjacent cellId');
+                  } else {
+                    dlog('ChampSelect heuristic failed (adjacent cell)');
+                  }
+                }
+              }
+            } else {
+              dlog('ChampSelect myTeam: self not found');
+            }
+          } catch {/* ignore */}
+        }
+
         // Additional attempt: some builds may expose players at session.gameData.gameData?.players or session.players
         if (!teammate && session) {
           const playerArrays: any[] = [];
@@ -191,7 +284,47 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
             } catch {}
           }
         }
-        if (!teammate) {
+        // Live Client fallback parsing
+        if (!teammate && liveData?.allPlayers && me?.riotId) {
+          try {
+            const myNorm = norm(me.riotId.split('#')[0]);
+            const players = liveData.allPlayers as any[];
+            const mePlayer = players.find(p => norm(p.summonerName) === myNorm);
+            if (mePlayer) {
+              const side = mePlayer.team || mePlayer.teamType;
+              const mates = players.filter(p => (p.team||p.teamType) === side && norm(p.summonerName) !== myNorm);
+              if (mates.length === 1) {
+                teammate = { gameName: mates[0].summonerName, tagLine: mates[0].gameTag || mates[0].tagLine };
+                dlog('Teammate resolved via LiveClientData fallback (single mate)');
+              } else if (mates.length === 2) {
+                // Arena: pair expected to be me + exactly one partner; try pairing by championSelections list if available
+                const champSelections = session?.gameData?.playerChampionSelections as any[] | undefined;
+                if (champSelections && me?.puuid) {
+                  const mySel = champSelections.find(s => s.puuid === me.puuid);
+                  if (mySel) {
+                    // Attempt to find a selection with same champion pick time window (rough heuristic) – not available? fallback first
+                    teammate = { gameName: mates[0].summonerName, tagLine: mates[0].gameTag || mates[0].tagLine };
+                    dlog('Teammate chosen via champ selection heuristic');
+                  } else {
+                    teammate = { gameName: mates[0].summonerName, tagLine: mates[0].gameTag || mates[0].tagLine };
+                    dlog('Teammate chosen via arena fallback (no mySel)');
+                  }
+                } else {
+                  teammate = { gameName: mates[0].summonerName, tagLine: mates[0].gameTag || mates[0].tagLine };
+                  dlog('Teammate heuristically chosen from 2 side members (arena heuristic basic)');
+                }
+              } else if (mates.length > 2) {
+                dlog('LiveClient fallback ambiguous (skipping)', { count: mates.length });
+              } else {
+                dlog('LiveClient fallback: no side mates');
+              }
+              if (!phaseStr) { phaseStr = 'InProgress'; dlog('Phase inferred as InProgress from live client'); }
+            } else {
+              dlog('LiveClient me not found', { myNorm, names: players.map(p => p.summonerName) });
+            }
+          } catch {/* ignore */}
+        }
+  if (!teammate) {
           const sessionKeys = session ? Object.keys(session) : [];
           if (lobby?.members?.length) {
             dlog('No teammate determined after lobby + session inspection', { lobbyCount: lobby.members.length, sessionKeys });
@@ -287,7 +420,11 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
     }
     poll();
     intervalRef.current = window.setInterval(poll, 5000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    const fast = setInterval(() => {
+      if (bootstrapAttemptsRef.count >= bootstrapAttemptsRef.max || prevTeammateRef.current) { clearInterval(fast); return; }
+      bootstrapAttemptsRef.count++; poll();
+    }, 1000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); clearInterval(fast); };
   }, [me, voice.state.connected, voice.autoConnectInGame, voice.autoLeavePostGame]);
 
   return <TeamMateCtx.Provider value={state}>{children}</TeamMateCtx.Provider>;

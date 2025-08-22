@@ -1,6 +1,6 @@
 {
     "name":  "arena-buddy",
-    "version":  "0.1.28",
+    "version":  "0.1.29",
     "private":  true,
     "main":  "dist/main/main.js",
     "description":  "ArenaBuddy - Electron + React + Tailwind starter",

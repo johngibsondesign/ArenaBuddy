@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import https from 'node:https';
+import http from 'node:http';
 import { LcuAuth, LcuUser, LcuStatus, InternalAuth } from './types';
 
 // Simple event emitter
@@ -287,6 +288,25 @@ export async function getSummonerByPuuid(puuid: string): Promise<any|null> {
   if (!puuid) return null;
   return tryGet(`/lol-summoner/v2/summoners/puuid/${encodeURIComponent(puuid)}`);
 }
+
+// Live Client Data (port 2999) – only available while in an active match. Useful when launching mid-game.
+async function getLiveClient(pathname: string, timeoutMs = 1200): Promise<any|null> {
+  return new Promise(resolve => {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => { ctrl.abort(); resolve(null); }, timeoutMs);
+    const req = http.request({ host: '127.0.0.1', port: 2999, path: pathname, method: 'GET', signal: ctrl.signal }, res => {
+      if (res.statusCode && res.statusCode >= 400) { clearTimeout(to); resolve(null); return; }
+      let data = '';
+      res.on('data', d => data += d);
+      res.on('end', () => { clearTimeout(to); try { resolve(JSON.parse(data)); } catch { resolve(null); } });
+    });
+    req.on('error', () => { clearTimeout(to); resolve(null); });
+    req.end();
+  });
+}
+
+export async function getLiveGameData(): Promise<any|null> { return getLiveClient('/liveclientdata/allgamedata'); }
+export async function getLivePlayerList(): Promise<any|null> { return getLiveClient('/liveclientdata/playerlist'); }
 
 export function dispose() {
   disposed = true;

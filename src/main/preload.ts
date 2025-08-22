@@ -15,7 +15,9 @@ const lcuApi = {
   getGameflowPhase: () => safeInvoke('lcu:getGameflowPhase'),
   getGameflowSession: () => safeInvoke('lcu:getGameflowSession'),
   getChampSelectSession: () => safeInvoke('lcu:getChampSelectSession'),
-  getSummonerByPuuid: (puuid: string) => safeInvoke('lcu:getSummonerByPuuid', puuid)
+  getSummonerByPuuid: (puuid: string) => safeInvoke('lcu:getSummonerByPuuid', puuid),
+  getLiveGameData: () => safeInvoke('lcu:getLiveGameData')
+  ,getLivePlayerList: () => safeInvoke('lcu:getLivePlayerList')
 };
 
 const api = {

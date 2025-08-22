@@ -6,6 +6,8 @@ import { SummonerProvider } from './summoner/SummonerContext';
 import { DataDragonProvider } from './ddragon/DataDragonContext';
 import { BrowserRouter, HashRouter, Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar/Sidebar';
+import { useTeamMateVoice } from './voice/TeamMateVoiceContext';
+import { useVoice } from './voice/VoiceContext';
 import './index.css';
 import './supabaseEnv';
 import { ToastProvider } from './ui/ToastContext';
@@ -610,19 +612,39 @@ const ChampionsPage: React.FC = () => {
 const TitleBar: React.FC = () => {
 	const [max, setMax] = React.useState(false);
 	const api: any = (window as any).api;
+	const { phase } = useTeamMateVoice();
+	const voice = useVoice();
 	const toggleMax = async () => {
 		if (!api?.windowControls) return;
 		const state = await api.windowControls.maximize();
 		setMax(state);
 	};
+	function phaseLabel(p?: string) {
+		if (!p) return 'Idle';
+		if (p === 'ChampSelect') return 'Champ Select';
+		if (p === 'InProgress') return 'In Game';
+		if (p === 'EndOfGame') return 'Post Game';
+		return p;
+	}
+	const pillColor = !phase ? 'bg-gray-800 text-gray-400' : (
+		phase === 'Lobby' ? 'bg-sky-600/70 text-sky-100' :
+		phase === 'ChampSelect' ? 'bg-violet-600/70 text-violet-100' :
+		phase === 'InProgress' ? 'bg-emerald-600/70 text-emerald-100' :
+		phase === 'EndOfGame' ? 'bg-amber-600/70 text-amber-100' : 'bg-gray-700 text-gray-200'
+	);
 	return (
 		<div className="h-9 flex items-center justify-between pl-3 pr-1 select-none bg-gray-900 border-b border-gray-800 drag relative">
-			<div className="text-xs tracking-wide font-semibold text-gray-300"></div>
+			<div className="flex items-center gap-3 text-xs tracking-wide font-semibold text-gray-300">
+				<span className={`px-2 py-0.5 rounded-md text-[10px] font-medium leading-none border border-gray-700/60 no-drag ${pillColor}`}>{phaseLabel(phase)}</span>
+				{voice.state.connected && (
+					<span className="px-2 py-0.5 rounded-md text-[10px] font-medium leading-none bg-emerald-600/70 text-emerald-50 border border-emerald-500/40 no-drag">Voice Live</span>
+				)}
+			</div>
 			<div className="flex items-center gap-4 no-drag pr-2">
 				<div className="flex items-center gap-1">
-				<button onClick={() => api?.windowControls?.minimize()} className="w-9 h-7 grid place-content-center rounded hover:bg-gray-800 text-gray-400 hover:text-sky-400" aria-label="Minimize">&#x2212;</button>
-				<button onClick={toggleMax} className="w-9 h-7 grid place-content-center rounded hover:bg-gray-800 text-gray-400 hover:text-sky-400" aria-label="Maximize">{max ? '🗗' : '🗖'}</button>
-				<button onClick={() => api?.windowControls?.close()} className="w-9 h-7 grid place-content-center rounded hover:bg-red-600/80 text-gray-300 hover:text-white" aria-label="Close">&#x2715;</button>
+					<button onClick={() => api?.windowControls?.minimize()} className="w-9 h-7 grid place-content-center rounded hover:bg-gray-800 text-gray-400 hover:text-sky-400" aria-label="Minimize">&#x2212;</button>
+					<button onClick={toggleMax} className="w-9 h-7 grid place-content-center rounded hover:bg-gray-800 text-gray-400 hover:text-sky-400" aria-label="Maximize">{max ? '🗗' : '🗖'}</button>
+					<button onClick={() => api?.windowControls?.close()} className="w-9 h-7 grid place-content-center rounded hover:bg-red-600/80 text-gray-300 hover:text-white" aria-label="Close">&#x2715;</button>
 				</div>
 			</div>
 		</div>
