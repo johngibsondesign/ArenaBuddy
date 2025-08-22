@@ -54,6 +54,7 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
           api.getLobby(),
           api.getGameflowSession()
         ]);
+  dlog('poll start', { ts: Date.now(), prevPhase: lastPhaseRef.current });
         const phaseStr = typeof phase === 'string' ? phase : undefined;
         let teammate: { gameName: string; tagLine?: string } | null = null;
         // From lobby
@@ -98,6 +99,7 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
             othersCount: othersResolved.length,
             teammate: teammate ? teammate.gameName + '#' + (teammate.tagLine||'') : null
           });
+          if (!othersResolved.length) dlog('No other lobby members detected');
           if (resolved.some(r => r.name.startsWith('unknown_'))) {
             dlog('Raw lobby members (unresolved names present)', members.map(m => ({ keys: Object.keys(m), sample: { gameName: m.gameName, summonerName: m.summonerName, name: m.name, displayName: m.displayName, internalName: m.internalName, gameTag: m.gameTag, tagLine: m.tagLine, tag: m.tag, puuid: m.puuid, summonerId: m.summonerId } })));
           }
@@ -115,6 +117,7 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
             }
         }
         setState(s => ({ ...s, teammateRiotId: teammate?.gameName, teammateTagLine: teammate?.tagLine, phase: phaseStr, inGame: phaseStr === 'InProgress' }));
+  dlog('state updated', { teammate: teammate ? teammate.gameName + '#' + (teammate.tagLine||'') : null, phase: phaseStr });
 
         // Voice lifecycle logic
         if (phaseStr && phaseStr !== lastPhaseRef.current) {
@@ -134,6 +137,10 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
               }
               dlog('Attempt connect (Lobby)', { lobbyId, teammate: teammate.gameName + '#' + (teammate.tagLine||''), me: me.riotId + '#' + (me.tagLine||''), puuids: { self: me?.puuid, teammate: teammatePuuidRef.current } });
               voice.connect(lobbyId, 'supabase://voice', { name: me.riotId, iconId: me.profileIconId, riotId: me.riotId, tagLine: me.tagLine } as any);
+            } else if (teammate?.gameName && voice.state.connected) {
+              dlog('Already connected in lobby');
+            } else if (teammate?.gameName && !voice.autoConnectInGame) {
+              dlog('Teammate present but autoConnect disabled');
             }
           } else if (phaseStr === 'InProgress') {
             // If we did not meet in lobby (solo queue then matched) connect now using deterministic duo id
@@ -147,16 +154,22 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
               }
               dlog('Attempt connect (InGame)', { lobbyId, teammate: teammate.gameName + '#' + (teammate.tagLine||''), me: me.riotId + '#' + (me.tagLine||''), puuids: { self: me?.puuid, teammate: teammatePuuidRef.current } });
               voice.connect(lobbyId, 'supabase://voice', { name: me.riotId, iconId: me.profileIconId, riotId: me.riotId, tagLine: me.tagLine } as any);
+            } else if (teammate?.gameName && voice.state.connected) {
+              dlog('Already connected in-game');
+            } else if (teammate?.gameName && !voice.autoConnectInGame) {
+              dlog('In game teammate present but autoConnect disabled');
             }
           }
           if (phaseStr === 'EndOfGame') {
             // Leave if we met only in game (not lobby). If we were lobby duo keep call.
             if (voice.autoLeavePostGame && !lobbyJoinedRef.current && voice.state.connected) {
               voice.leave();
+              dlog('Leaving post game (no prior lobby)');
             }
           }
           if (phaseStr === 'None') { // fully out
             lobbyJoinedRef.current = false; // reset for next cycle
+            dlog('Reset lobbyJoinedRef due to phase None');
           }
         }
       } catch {/* ignore */}

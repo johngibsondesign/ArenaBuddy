@@ -28,6 +28,9 @@ export class VoiceManager {
   private selfId: string = crypto.randomUUID();
   private pendingMeta: any = null;
   private metaFlushTimer: any = null;
+  // Debug helpers (enable with localStorage.setItem('voice.debugVoice','1'))
+  private debugVoiceEnabled() { try { return localStorage.getItem('voice.debugVoice') === '1'; } catch { return false; } }
+  private vlog(...args: any[]) { if (this.debugVoiceEnabled()) { try { console.log('[Voice]', ...args); } catch {} } }
 
   on(l: Listener) { this.listeners.add(l); l(this.state); return () => this.listeners.delete(l); }
   private emit() { for (const l of this.listeners) l({ ...this.state }); }
@@ -44,6 +47,7 @@ export class VoiceManager {
         },
         video: false
       });
+  this.vlog('initDevices acquired localStream', this.localStream.getTracks().map(t => ({ kind: t.kind, id: t.id })));
       // Input gain path
       const ctx = new AudioContext();
       const src = ctx.createMediaStreamSource(this.localStream);
@@ -107,6 +111,7 @@ export class VoiceManager {
   async connect(lobbyId: string, signalingUrl: string, meta?: { name?: string; iconId?: number; riotId?: string; tagLine?: string }) {
     if (this.state.connected || this.state.connecting) return;
   this.lobbyId = lobbyId;
+  this.vlog('connect requested', { lobbyId, signalingUrl, meta });
   this.patch({ connecting: true, error: null, lobbyId, selfId: this.selfId });
     try {
   if (signalingUrl.startsWith('supabase://')) {
@@ -114,11 +119,11 @@ export class VoiceManager {
       } else {
         this.ws = new WebSocket(signalingUrl);
         this.ws.onmessage = (ev) => this.handleSignal(JSON.parse(ev.data));
-        this.ws.onopen = () => { this.send({ type: 'metadata', name: meta?.name, iconId: meta?.iconId, riotId: meta?.riotId, tagLine: meta?.tagLine }); };
-        this.ws.onerror = (e: any) => this.patch({ error: e.message || 'Signaling error' });
-        this.ws.onclose = () => this.cleanup('closed');
+    this.ws.onopen = () => { this.vlog('ws open'); this.send({ type: 'metadata', name: meta?.name, iconId: meta?.iconId, riotId: meta?.riotId, tagLine: meta?.tagLine }); };
+    this.ws.onerror = (e: any) => { this.vlog('ws error', e?.message); this.patch({ error: e.message || 'Signaling error' }); };
+    this.ws.onclose = () => { this.vlog('ws close'); this.cleanup('closed'); };
       }
-    } catch (e: any) { this.patch({ error: e.message || 'Failed to connect signaling', connecting: false }); }
+  } catch (e: any) { this.vlog('connect error', e); this.patch({ error: e.message || 'Failed to connect signaling', connecting: false }); }
   }
 
   private async initSupabase(_url: string, lobbyId: string, meta?: { name?: string; iconId?: number; riotId?: string; tagLine?: string }) {
@@ -129,11 +134,13 @@ export class VoiceManager {
   // Optional channel name hashing to reduce easy enumeration
   const salt = (import.meta as any).env?.VITE_VOICE_SALT || (window as any).VITE_VOICE_SALT;
   const channelName = salt ? `voice_${await this.hashChannel(lobbyId, salt)}` : `voice_${lobbyId}`;
+    this.vlog('initSupabase channel', { channelName, lobbyId, saltPresent: !!salt });
     this.channel = this.supabase.channel(channelName, { config: { presence: { key: this.selfId } } });
     this.channel.on('broadcast', { event: 'signal' }, (arg: any) => { const payload = arg?.payload; if (!payload || payload.from === this.selfId) return; this.handleSignal(payload); });
     this.channel.on('presence', { event: 'sync' }, () => {
       const presenceState: any = this.channel?.presenceState() || {};
       const others = Object.keys(presenceState).filter(k => k !== this.selfId);
+      this.vlog('presence sync', { others, count: others.length });
       const newSet = new Set(others);
       // removed peers
       this.presenceSet.forEach(id => { if (!newSet.has(id)) this.removePeer(id); });
@@ -149,6 +156,11 @@ export class VoiceManager {
     await this.channel.subscribe((s: any) => {
       if (s === 'SUBSCRIBED') {
   this.queueMeta({ name: meta?.name, iconId: meta?.iconId, riotId: meta?.riotId, tagLine: meta?.tagLine, muted: this.state.muted });
+        // If we're alone initially, clear connecting state so UI doesn't show perpetual connecting...
+        if (this.state.connecting) {
+          this.patch({ connecting: false });
+        }
+        this.vlog('channel subscribed');
       }
     });
   }
@@ -169,6 +181,7 @@ export class VoiceManager {
     pc.ontrack = (e) => this.attachStream(id, e.streams[0]);
     pc.oniceconnectionstatechange = () => {
       const st = pc.iceConnectionState;
+      this.vlog('iceConnectionState', { peer: id, state: st });
       if (st === 'failed' || st === 'disconnected') {
         // Attempt quick renegotiation once
         setTimeout(() => {
@@ -178,6 +191,8 @@ export class VoiceManager {
         }, 800);
       }
     };
+    pc.onconnectionstatechange = () => { this.vlog('connectionState', { peer: id, state: pc.connectionState }); };
+    this.vlog('created peer', { peer: id });
     return pc;
   }
 
@@ -193,6 +208,7 @@ export class VoiceManager {
   private async handleSignal(msg: any) {
     const from = msg.from || 'remote';
   if (msg.to && msg.to !== this.selfId) return; // directed elsewhere
+  this.vlog('handleSignal', { type: msg.type, from, to: msg.to });
     switch (msg.type) {
       case 'offer': {
         const pc = this.getOrCreatePeer(from);
@@ -201,15 +217,17 @@ export class VoiceManager {
         await pc.setLocalDescription(ans);
   this.send({ type: 'answer', sdp: ans, to: from } as any);
         this.patch({ connected: true, connecting: false });
+    this.vlog('answer sent', { to: from });
         break; }
       case 'answer': {
         const pc = this.getOrCreatePeer(from);
         if (!pc.currentLocalDescription) return;
         await pc.setRemoteDescription(msg.sdp);
         this.patch({ connected: true, connecting: false });
+    this.vlog('answer received', { from });
         break; }
       case 'candidate': {
-        if (msg.candidate) { const pc = this.getOrCreatePeer(from); try { await pc.addIceCandidate(msg.candidate); } catch {} }
+		if (msg.candidate) { const pc = this.getOrCreatePeer(from); try { await pc.addIceCandidate(msg.candidate); this.vlog('candidate added', { from }); } catch (e) { this.vlog('candidate error', { from, e }); } }
         break; }
       case 'metadata': {
         let participant = this.state.participants.find(p => p.id === from);
@@ -221,6 +239,7 @@ export class VoiceManager {
         if (typeof msg.muted === 'boolean') participant.muted = msg.muted;
         if (typeof msg.speaking === 'boolean') participant.speaking = msg.speaking;
         this.emit();
+    this.vlog('metadata received', { from, keys: Object.keys(msg).filter(k => !['type','from','to'].includes(k)) });
         break; }
       case 'leave': { this.removePeer(from); break; }
     }
@@ -231,6 +250,7 @@ export class VoiceManager {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
   this.send({ type: 'offer', sdp: offer, to: remoteId } as any);
+  this.vlog('offer sent', { to: remoteId });
   }
 
   mute(m: boolean) {
@@ -278,6 +298,7 @@ export class VoiceManager {
     const full = { ...msg, from: this.selfId } as any;
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(full));
     if (this.channel) this.channel.send({ type: 'broadcast', event: 'signal', payload: full });
+  this.vlog('send', { type: (full as any).type, to: (full as any).to });
   }
 
   private async hashChannel(lobbyId: string, salt: string) {
