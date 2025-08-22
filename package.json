@@ -1,71 +1,65 @@
 ﻿{
-    "name":  "arena-buddy",
-    "version":  "0.1.5",
-    "private":  true,
-    "main":  "dist/main/main.js",
-    "description":  "ArenaBuddy - Electron + React + Tailwind starter",
-    "author":  "",
-    "license":  "MIT",
-    "scripts":  {
-                    "dev":  "cross-env NODE_ENV=development concurrently \"npm:dev:mainwatch\" \"npm:dev:renderer\" \"npm:dev:tailwind\" \"npm:dev:electron\"",
-                    "dev:mainwatch":  "tsc -p tsconfig.main.json --watch",
-                    "dev:electron":  "wait-on dist/main/main.js dist/main/preload.js \u0026\u0026 electron dist/main/main.js",
-                    "dev:renderer":  "vite",
-                    "dev:tailwind":  "tailwindcss -i ./src/renderer/index.css -o ./src/renderer/output.css --watch",
-                    "build":  "npm run build:tailwind \u0026\u0026 vite build \u0026\u0026 npm run build:generated \u0026\u0026 npm run build:main",
-                    "build:generated":  "node scripts/embed-supabase-url.js",
-                    "build:tailwind":  "tailwindcss -i ./src/renderer/index.css -o ./src/renderer/output.css --minify",
-                    "build:main":  "tsc -p tsconfig.main.json",
-                    "dist:app":  "npm run build \u0026\u0026 electron-builder",
-                    "clean":  "rimraf dist",
-                    "lint":  "eslint . --ext .ts,.tsx",
-                    "typecheck":  "tsc --noEmit",
-                    "start":  "electron ./dist/main/main.js"
-                },
-    "devDependencies":  {
-                            "@types/node":  "^20.11.30",
-                            "@types/react":  "^18.2.21",
-                            "@types/react-dom":  "^18.2.7",
-                            "autoprefixer":  "^10.4.17",
-                            "concurrently":  "^8.2.2",
-                            "cross-env":  "^7.0.3",
-                            "electron":  "^29.1.0",
-                            "eslint":  "^8.56.0",
-                            "eslint-plugin-react":  "^7.34.1",
-                            "postcss":  "^8.4.35",
-                            "tailwindcss":  "^3.4.3",
-                            "ts-node":  "^10.9.2",
-                            "typescript":  "^5.4.2",
-                            "vite":  "^5.1.4",
-                            "@vitejs/plugin-react":  "^4.2.1",
-                            "wait-on":  "^7.2.0",
-                            "rimraf":  "^5.0.5",
-                            "electron-builder":  "^24.13.3"
-                        },
-    "dependencies":  {
-                         "react":  "^18.2.0",
-                         "react-dom":  "^18.2.0",
-                         "react-router-dom":  "^6.23.1",
-                         "@fortawesome/fontawesome-svg-core":  "^6.5.2",
-                         "@fortawesome/free-solid-svg-icons":  "^6.5.2",
-                         "@fortawesome/react-fontawesome":  "^0.2.0",
-                         "dotenv":  "^16.4.5",
-                         "electron-updater":  "^6.1.8"
-                     },
-    "build":  {
-                  "appId":  "com.arenabuddy.app",
-                  "productName":  "ArenaBuddy",
-                  "directories":  {
-                                      "output":  "release"
-                                  },
-                  "files":  [
-                                "dist/**/*",
-                                "package.json"
-                            ],
-                  "publish":  [
-                                  {
-                                      "provider":  "github"
-                                  }
-                              ]
-              }
+    "name": "arena-buddy",
+    "version": "0.1.5",
+    "private": true,
+    "main": "dist/main/main.js",
+    "description": "ArenaBuddy - Electron + React + Tailwind starter",
+    "author": "",
+    "license": "MIT",
+    "scripts": {
+        "dev": "cross-env NODE_ENV=development concurrently \"npm:dev:mainwatch\" \"npm:dev:renderer\" \"npm:dev:tailwind\" \"npm:dev:electron\"",
+        "dev:mainwatch": "tsc -p tsconfig.main.json --watch",
+        "dev:electron": "wait-on dist/main/main.js dist/main/preload.js && electron dist/main/main.js",
+        "dev:renderer": "vite",
+        "dev:tailwind": "tailwindcss -i ./src/renderer/index.css -o ./src/renderer/output.css --watch",
+        "build": "npm run build:tailwind && vite build && npm run build:generated && npm run build:main",
+        "build:generated": "node scripts/embed-supabase-url.js",
+        "build:tailwind": "tailwindcss -i ./src/renderer/index.css -o ./src/renderer/output.css --minify",
+        "build:main": "tsc -p tsconfig.main.json",
+        "dist:app": "npm run build && electron-builder",
+        "clean": "rimraf dist",
+        "lint": "eslint . --ext .ts,.tsx",
+        "typecheck": "tsc --noEmit",
+        "start": "electron ./dist/main/main.js"
+    },
+    "devDependencies": {
+        "@types/node": "^20.11.30",
+        "@types/react": "^18.2.21",
+        "@types/react-dom": "^18.2.7",
+        "autoprefixer": "^10.4.17",
+        "concurrently": "^8.2.2",
+        "cross-env": "^7.0.3",
+        "electron": "^29.1.0",
+        "eslint": "^8.56.0",
+        "eslint-plugin-react": "^7.34.1",
+        "postcss": "^8.4.35",
+        "tailwindcss": "^3.4.3",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.4.2",
+        "vite": "^5.1.4",
+        "@vitejs/plugin-react": "^4.2.1",
+        "wait-on": "^7.2.0",
+        "rimraf": "^5.0.5",
+        "electron-builder": "^24.13.3"
+    },
+    "dependencies": {
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0",
+        "react-router-dom": "^6.23.1",
+        "@fortawesome/fontawesome-svg-core": "^6.5.2",
+        "@fortawesome/free-solid-svg-icons": "^6.5.2",
+        "@fortawesome/react-fontawesome": "^0.2.0",
+        "dotenv": "^16.4.5",
+        "electron-updater": "^6.1.8"
+    },
+    "build": {
+        "appId": "com.arenabuddy.app",
+        "productName": "ArenaBuddy",
+        "directories": { "output": "release" },
+        "files": [
+            "dist/**/*",
+            "package.json"
+        ],
+        "publish": [ { "provider": "github" } ]
+    }
 }
