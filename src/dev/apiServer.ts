@@ -1,5 +1,8 @@
-import express from 'express';
-import cors from 'cors';
+// Use CommonJS style requires to avoid default import interop issues when running via ts-node
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const express = require('express');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const cors = require('cors');
 import 'dotenv/config';
 // Ensure fetch exists (Node <18 fallback)
 // @ts-ignore

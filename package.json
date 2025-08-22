@@ -7,16 +7,15 @@
   "author": "",
   "license": "MIT",
   "scripts": {
-  "dev": "cross-env NODE_ENV=development concurrently \"npm:dev:mainwatch\" \"npm:dev:renderer\" \"npm:dev:tailwind\" \"npm:dev:electron\" \"npm:dev:api\"",
+  "dev": "cross-env NODE_ENV=development concurrently \"npm:dev:mainwatch\" \"npm:dev:renderer\" \"npm:dev:tailwind\" \"npm:dev:electron\"",
     "dev:mainwatch": "tsc -p tsconfig.main.json --watch",
   "dev:electron": "wait-on dist/main/main.js dist/main/preload.js && electron dist/main/main.js",
-  "dev:api": "ts-node src/dev/apiServer.ts",
     "dev:renderer": "vite",
     "dev:tailwind": "tailwindcss -i ./src/renderer/index.css -o ./src/renderer/output.css --watch",
     "build": "npm run build:tailwind && vite build && npm run build:main",
     "build:tailwind": "tailwindcss -i ./src/renderer/index.css -o ./src/renderer/output.css --minify",
     "build:main": "tsc -p tsconfig.main.json",
-  "dist:app": "npm run build && electron-builder",
+    "dist:app": "npm run build && electron-builder",
     "clean": "rimraf dist",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
@@ -44,16 +43,13 @@
   },
   "dependencies": {
     "react": "^18.2.0",
-  "react-dom": "^18.2.0",
-  "react-router-dom": "^6.23.1",
-  "@fortawesome/fontawesome-svg-core": "^6.5.2",
-  "@fortawesome/free-solid-svg-icons": "^6.5.2",
-  "@fortawesome/react-fontawesome": "^0.2.0",
-  "dotenv": "^16.4.5",
-  "express": "^4.19.2",
-  "cors": "^2.8.5",
-  "node-fetch": "^3.3.2",
-  "electron-updater": "^6.1.8"
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.23.1",
+    "@fortawesome/fontawesome-svg-core": "^6.5.2",
+    "@fortawesome/free-solid-svg-icons": "^6.5.2",
+    "@fortawesome/react-fontawesome": "^0.2.0",
+    "dotenv": "^16.4.5",
+    "electron-updater": "^6.1.8"
   }
   ,"build": {
     "appId": "com.arenabuddy.app",

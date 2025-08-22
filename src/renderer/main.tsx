@@ -156,6 +156,8 @@ const ProfilePage: React.FC = () => {
 	const [data, setData] = React.useState<SummonerResult | null>(null);
 	const [error, setError] = React.useState<string | null>(null);
 	const [loading, setLoading] = React.useState(false);
+	const [attempt, setAttempt] = React.useState(0);
+	const maxAttempts = 3;
 	const [version, setVersion] = React.useState('14.16.1');
 
 	React.useEffect(() => {
@@ -169,23 +171,72 @@ const ProfilePage: React.FC = () => {
 
 	React.useEffect(() => {
 		const q = `${decodedId}#${decodedTag}`;
-		setLoading(true); setError(null); setData(null);
-		(async () => {
+		let cancelled = false;
+		async function run(at: number) {
+			setLoading(true); setError(null); setData(null);
 			try {
 				if (hasBridge) {
 					const bridge = (window as any).api;
 					const res = await bridge.searchSummoner(q);
-					if (!res || !res.ok) setError(res?.error || 'Lookup failed'); else setData(res);
+					if (!res || !res.ok) {
+						if (!cancelled) setError(formatError(res?.error));
+						if (shouldRetry(res?.error) && at < maxAttempts - 1) {
+							setTimeout(() => !cancelled && run(at + 1), 500 * Math.pow(2, at));
+						} else if (!shouldRetry(res?.error)) {
+							// no retry
+						}
+					} else if (!cancelled) setData(res);
 				} else {
 					const params = new URLSearchParams({ q });
-						const res = await fetch(`http://localhost:${(window as any).__DEV_API_PORT__ || 5174}/api/riot/search?${params}`);
-						const json = await res.json();
-						if (!json.ok) setError(json.error || 'Lookup failed'); else setData(json);
+					const res = await fetch(`http://localhost:${(window as any).__DEV_API_PORT__ || 5174}/api/riot/search?${params}`);
+					const json = await res.json();
+					if (!json.ok) {
+						if (!cancelled) setError(formatError(json.error));
+						if (shouldRetry(json.error) && at < maxAttempts - 1) {
+							setTimeout(() => !cancelled && run(at + 1), 500 * Math.pow(2, at));
+						}
+					} else if (!cancelled) setData(json);
 				}
-			} catch (e:any) { setError(e.message || 'Error'); }
-			finally { setLoading(false); }
-		})();
+			} catch (e:any) {
+				if (!cancelled) {
+					setError(formatError(e.message || 'Error'));
+					if (shouldRetry(e.message) && at < maxAttempts - 1) {
+						setTimeout(() => !cancelled && run(at + 1), 500 * Math.pow(2, at));
+					}
+				}
+			} finally { if (!cancelled) setLoading(false); }
+		}
+		function shouldRetry(msg?: string) {
+			if (!msg) return false;
+			return /network|fetch failed|timeout|edge function error/i.test(msg) && !/not configured/i.test(msg);
+		}
+		function formatError(msg?: string) {
+			if (!msg) return 'Lookup failed';
+			if (/SUPABASE_FUNCTIONS_URL not configured/i.test(msg)) return msg + '\nConfigure SUPABASE_FUNCTIONS_URL secret in your build environment.';
+			if (/Edge function error/i.test(msg)) return 'Service temporarily unavailable. Please retry.';
+			return msg;
+		}
+		setAttempt(0);
+		run(0);
+		return () => { cancelled = true; };
 	}, [riotId, tagLine]);
+
+	const manualRetry = () => {
+		setAttempt(a => a + 1);
+		// trigger effect by changing key (riotId/tagLine havent changed) => call run again manually
+		const q = `${decodedId}#${decodedTag}`; // call via bridge directly
+		// Force re-run by duplicating logic minimal
+		if (hasBridge) {
+			( window as any).api.searchSummoner(q).then((res:any) => {
+				if (!res || !res.ok) setError(res?.error || 'Lookup failed'); else setError(null), setData(res);
+			}).catch((e:any)=> setError(e.message||'Error'));
+		} else {
+			const params = new URLSearchParams({ q });
+			fetch(`http://localhost:${(window as any).__DEV_API_PORT__ || 5174}/api/riot/search?${params}`).then(r=>r.json()).then(json => {
+				if (!json.ok) setError(json.error||'Lookup failed'); else { setError(null); setData(json); }
+			}).catch(e=> setError(e.message||'Error'));
+		}
+	};
 
 	return (
 		<div className="flex flex-1 flex-col p-8 text-gray-200 overflow-auto bg-gray-950">
@@ -194,7 +245,12 @@ const ProfilePage: React.FC = () => {
 					<BackButton />
 				</div>
 			{loading && <div className="text-sm text-gray-400">Loading…</div>}
-			{error && <div className="text-sm text-red-400 whitespace-pre-wrap mb-4">{error}</div>}
+			{error && (
+				<div className="text-sm text-red-400 whitespace-pre-wrap mb-4 flex flex-col gap-2">
+					<span>{error}</span>
+					<button onClick={manualRetry} className="self-start inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-gray-800 border border-gray-700 hover:bg-gray-700 text-[11px] font-medium text-gray-200">Retry</button>
+				</div>
+			)}
 			{data && (
 				<div className="flex items-center gap-6 bg-gray-900/60 rounded-lg p-6 border border-gray-800 w-full max-w-xl">
 					<div className="w-24 h-24 rounded-lg bg-gray-800 flex items-center justify-center overflow-hidden">

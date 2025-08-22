@@ -13,3 +13,4 @@ Thumbs.db
 coverage/
 tmp/
 *.swp
+src/main/riotSecret.ts

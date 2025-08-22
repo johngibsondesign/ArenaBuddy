@@ -32,9 +32,7 @@ jobs:
       - name: Package & Publish (GitHub Releases)
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
-          RIOT_REGION: europe
-          RIOT_PLATFORM: euw1
+          SUPABASE_FUNCTIONS_URL: ${{ secrets.SUPABASE_FUNCTIONS_URL }}
         run: npx electron-builder --win --publish always
 
       - name: Upload Dist Artifact (debug)

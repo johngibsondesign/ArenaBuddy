@@ -89,58 +89,23 @@ app.whenReady().then(() => {
     }
     const riotId = match[1].trim();
     const tagLine = match[2].trim();
-  const apiKey = process.env.RIOT_API_KEY;
-    if (!apiKey) {
-      return { ok: false, error: 'Missing RIOT_API_KEY in .env' };
+    const functionsBase = (process.env.SUPABASE_FUNCTIONS_URL || '').replace(/\/$/, '');
+    if (!functionsBase) {
+      return { ok: false, error: 'SUPABASE_FUNCTIONS_URL not configured. Cannot perform search.' };
     }
-  const region = process.env.RIOT_REGION || 'americas';
-  const platform = process.env.RIOT_PLATFORM || 'na1';
-  // Safe debug log (does not output full key)
-  const safeKey = apiKey ? `${apiKey.slice(0,5)}…${apiKey.slice(-4)}` : null;
-  console.log('[riot:search] env config', { apiKey: safeKey, region, platform });
+    const url = `${functionsBase}/riot-search?q=${encodeURIComponent(`${riotId}#${tagLine}`)}`;
     try {
-      console.log('[riot:search] incoming', { riotId, tagLine, region, platform });
-      const accountBase = `https://${region}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(riotId)}/${encodeURIComponent(tagLine)}`;
-      let accountRes = await fetch(accountBase, { headers: { 'X-Riot-Token': apiKey } });
-      if (accountRes.status === 403 || accountRes.status === 401) {
-        // retry with query param style key
-        const retryUrl = `${accountBase}?api_key=${apiKey}`;
-        console.warn('[riot:search] retrying account lookup with query param');
-        accountRes = await fetch(retryUrl);
+      const headers: Record<string,string> = { 'Accept': 'application/json' };
+      if (process.env.SUPABASE_ANON_KEY) headers['apikey'] = process.env.SUPABASE_ANON_KEY;
+      const res = await fetch(url, { headers });
+      if (!res.ok) {
+        const text = await res.text();
+        return { ok: false, error: `Edge function error (${res.status})`, details: text };
       }
-      if (!accountRes.ok) {
-        const text = await accountRes.text();
-        console.warn('[riot:search] account lookup failed', accountRes.status, text);
-        return { ok: false, stage: 'account', error: `Account lookup failed (${accountRes.status})`, details: text };
-      }
-      const accountData: any = await accountRes.json();
-      if (!accountData?.puuid) {
-        return { ok: false, error: 'No PUUID in account response', details: JSON.stringify(accountData).slice(0,400) };
-      }
-      const summonerBase = `https://${platform}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/${accountData.puuid}`;
-      let summonerRes = await fetch(summonerBase, { headers: { 'X-Riot-Token': apiKey } });
-      if (summonerRes.status === 403 || summonerRes.status === 401) {
-        const retrySum = `${summonerBase}?api_key=${apiKey}`;
-        console.warn('[riot:search] retrying summoner lookup with query param');
-        summonerRes = await fetch(retrySum);
-      }
-      if (!summonerRes.ok) {
-        const text = await summonerRes.text();
-        console.warn('[riot:search] summoner lookup failed', summonerRes.status, text);
-        return { ok: false, stage: 'summoner', error: `Summoner lookup failed (${summonerRes.status})`, details: text };
-      }
-      const summonerData: any = await summonerRes.json();
-      return {
-        ok: true,
-        riotId,
-        tagLine,
-        summonerName: accountData.gameName || summonerData.name || riotId,
-        profileIconId: summonerData.profileIconId,
-        level: summonerData.summonerLevel,
-      };
+      const json = await res.json();
+      return json;
     } catch (err: any) {
-      console.error('[riot:search] exception', err);
-      return { ok: false, error: err.message || 'Request error' };
+      return { ok: false, error: 'Edge function fetch failed', details: err.message };
     }
   });
 
