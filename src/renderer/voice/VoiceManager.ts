@@ -30,6 +30,7 @@ export class VoiceManager {
   private metaFlushTimer: any = null;
   private identity: { name?: string; iconId?: number; riotId?: string; tagLine?: string } = {};
   private pendingIce: Record<string, any[]> = {};
+  private lastMetaSent?: string; // to avoid flooding identical metadata
   // Debug helpers (enable with localStorage.setItem('voice.debugVoice','1'))
   private debugVoiceEnabled() { try { return localStorage.getItem('voice.debugVoice') === '1'; } catch { return false; } }
   private vlog(...args: any[]) { if (this.debugVoiceEnabled()) { try { console.log('[Voice]', ...args); } catch {} } }
@@ -171,6 +172,7 @@ export class VoiceManager {
     });
     await this.channel.subscribe((s: any) => {
       if (s === 'SUBSCRIBED') {
+  try { this.channel?.track({ online: true }); this.vlog('presence track sent'); } catch (e) { this.vlog('presence track error', (e as any)?.message); }
   this.queueMeta({ name: meta?.name, iconId: meta?.iconId, riotId: meta?.riotId, tagLine: meta?.tagLine, muted: this.state.muted });
         // If we're alone initially, clear connecting state so UI doesn't show perpetual connecting...
         if (this.state.connecting) {
@@ -213,6 +215,7 @@ export class VoiceManager {
         }, 800);
       }
     };
+  (pc as any).onicecandidateerror = (e: any) => { this.vlog('icecandidateerror', { peer: id, error: e?.errorText || e?.message }); };
     pc.onconnectionstatechange = () => { this.vlog('connectionState', { peer: id, state: pc.connectionState }); };
     this.vlog('created peer', { peer: id });
   // Ensure we actually have a sending audio track (avoid cases where getUserMedia failed silently)
@@ -222,9 +225,10 @@ export class VoiceManager {
       if (!this.peers.has(id)) { clearInterval(statsInterval); return; }
       try {
         const stats = await pc.getStats();
-        let audio: any = null;
-        stats.forEach(r => { if (r.type === 'inbound-rtp' && r.kind === 'audio') audio = r; });
-        if (audio) this.vlog('inbound-audio-stats', { peer: id, bytes: audio.bytesReceived, packets: audio.packetsReceived, jitter: audio.jitter, packetsLost: audio.packetsLost });
+    let inbound: any = null; let outbound: any = null;
+    stats.forEach(r => { if (r.type === 'inbound-rtp' && r.kind === 'audio') inbound = r; else if (r.type === 'outbound-rtp' && r.kind === 'audio') outbound = r; });
+    if (inbound) this.vlog('inbound-audio-stats', { peer: id, bytes: inbound.bytesReceived, packets: inbound.packetsReceived, jitter: inbound.jitter, packetsLost: inbound.packetsLost });
+    if (outbound) this.vlog('outbound-audio-stats', { peer: id, bytes: outbound.bytesSent, packets: outbound.packetsSent });
       } catch {}
     }, 5000);
     return pc;
@@ -330,16 +334,8 @@ export class VoiceManager {
         if (typeof msg.speaking === 'boolean') participant.speaking = msg.speaking;
         this.emit();
     this.vlog('metadata received', { from, keys: Object.keys(msg).filter(k => !['type','from','to'].includes(k)) });
-        // Fallback: if we have not established a peer yet (no offer/answer traffic) attempt negotiation deterministically
-        if (!this.peers.get(from)) {
-          const initiator = this.selfId < from; // simple deterministic rule
-          this.vlog('metadata fallback peer check', { from, initiator });
-          const pc = this.getOrCreatePeer(from);
-          if (initiator && pc.signalingState === 'stable') {
-            this.ensureSendTrack(from);
-            try { await this.startOffer(from); } catch (e) { this.vlog('offer start error (metadata fallback)', (e as any)?.message); }
-          }
-        }
+  // Fallback: attempt negotiation if neither side has exchanged SDP yet
+  this.negotiateIfNeeded(from);
         break; }
       case 'leave': { this.removePeer(from); break; }
     }
@@ -473,8 +469,30 @@ export class VoiceManager {
     if (!this.metaFlushTimer) {
       this.metaFlushTimer = setTimeout(() => {
         const payload = this.pendingMeta; this.pendingMeta = null; this.metaFlushTimer = null;
-        if (payload) this.send({ type: 'metadata', ...payload });
+        if (payload) {
+          const key = JSON.stringify(payload);
+          if (key !== this.lastMetaSent) {
+            this.lastMetaSent = key;
+            this.send({ type: 'metadata', ...payload });
+          } else {
+            this.vlog('skip duplicate metadata');
+          }
+        }
       }, 80);
+    }
+  }
+
+  private negotiateIfNeeded(remoteId: string) {
+    const pc = this.getOrCreatePeer(remoteId);
+    const haveLocal = !!pc.currentLocalDescription;
+    const haveRemote = !!pc.currentRemoteDescription;
+    if (!haveLocal && !haveRemote) {
+      const initiator = this.selfId < remoteId;
+      this.vlog('negotiateIfNeeded', { remoteId, initiator, signalingState: pc.signalingState, haveLocal, haveRemote });
+      if (initiator && pc.signalingState === 'stable') {
+        this.ensureSendTrack(remoteId);
+        this.startOffer(remoteId).catch(e => this.vlog('negotiateIfNeeded offer error', (e as any)?.message));
+      }
     }
   }
 }
