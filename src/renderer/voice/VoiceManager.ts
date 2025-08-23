@@ -175,7 +175,20 @@ export class VoiceManager {
   private async initSupabase(_url: string, lobbyId: string, meta?: { name?: string; iconId?: number; riotId?: string; tagLine?: string }) {
     const projectUrl = (window as any).SUPABASE_URL || (import.meta as any).env?.VITE_SUPABASE_URL || (process as any).env?.SUPABASE_URL;
     const anonKey = (window as any).SUPABASE_ANON_KEY || (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || (process as any).env?.SUPABASE_ANON_KEY;
-    if (!projectUrl || !anonKey) throw new Error('Missing Supabase configuration');
+    
+    this.vlog('initSupabase config check', { 
+      hasProjectUrl: !!projectUrl, 
+      hasAnonKey: !!anonKey,
+      projectUrl: projectUrl ? projectUrl.slice(0, 30) + '...' : 'missing',
+      lobbyId 
+    });
+    
+    if (!projectUrl || !anonKey) {
+      const error = `Missing Supabase configuration - URL: ${!!projectUrl}, Key: ${!!anonKey}`;
+      this.vlog('Supabase config error', error);
+      throw new Error(error);
+    }
+    
     this.supabase = createClient(projectUrl, anonKey, { auth: { persistSession: false }, realtime: { params: { eventsPerSecond: 10 } } });
   // Optional channel name hashing to reduce easy enumeration
   const salt = (import.meta as any).env?.VITE_VOICE_SALT || (window as any).VITE_VOICE_SALT;
@@ -214,17 +227,45 @@ export class VoiceManager {
       });
       this.presenceSet = newSet;
     });
-    await this.channel.subscribe((s: any) => {
+    
+    // Add error handling for subscription
+    const subscriptionPromise = this.channel.subscribe((s: any) => {
+      this.vlog('subscription status', { status: s });
       if (s === 'SUBSCRIBED') {
-  try { this.channel?.track({ online: true }); this.vlog('presence track sent'); } catch (e) { this.vlog('presence track error', (e as any)?.message); }
+  try { 
+    this.channel?.track({ online: true }); 
+    this.vlog('presence track sent'); 
+  } catch (e) { 
+    this.vlog('presence track error', (e as any)?.message); 
+    this.patch({ error: 'Failed to track presence: ' + ((e as any)?.message || 'unknown error') });
+  }
   this.queueMeta({ name: meta?.name, iconId: meta?.iconId, riotId: meta?.riotId, tagLine: meta?.tagLine, muted: this.state.muted });
         // If we're alone initially, clear connecting state so UI doesn't show perpetual connecting...
         if (this.state.connecting) {
           this.patch({ connecting: false });
         }
         this.vlog('channel subscribed');
+      } else if (s === 'CHANNEL_ERROR') {
+        this.vlog('channel error occurred');
+        this.patch({ error: 'Channel connection error' });
+      } else if (s === 'TIMED_OUT') {
+        this.vlog('channel subscription timed out');
+        this.patch({ error: 'Connection timed out' });
       }
     });
+    
+    // Add timeout for subscription
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Subscription timeout after 10 seconds')), 10000);
+    });
+    
+    try {
+      await Promise.race([subscriptionPromise, timeoutPromise]);
+    } catch (error) {
+      this.vlog('subscription failed', (error as any)?.message);
+      this.patch({ error: 'Failed to subscribe to voice channel: ' + ((error as any)?.message || 'timeout') });
+      throw error;
+    }
   }
 
   private createPeer() { // legacy
@@ -656,6 +697,33 @@ export class VoiceManager {
     const queued = this.signalQueue.splice(0);
     queued.forEach(m => { m.to = peer; this.send(m); });
   }
+
+  // Debug/test methods
+  testConnection(lobbyId?: string) {
+    const testLobbyId = lobbyId || 'test_' + Date.now();
+    this.vlog('testConnection starting', { lobbyId: testLobbyId });
+    return this.connect(testLobbyId, 'supabase://voice', { name: 'TestUser', riotId: 'TestUser', tagLine: 'TEST' });
+  }
+
+  getDebugInfo() {
+    return {
+      state: this.state,
+      selfId: this.selfId,
+      primaryRemote: this.primaryRemote,
+      peersCount: this.peers.size,
+      presenceCount: this.presenceSet.size,
+      hasLocalStream: !!this.localStream,
+      hasSupabase: !!this.supabase,
+      hasChannel: !!this.channel,
+      supabaseUrl: (window as any).SUPABASE_URL,
+      hasAnonKey: !!(window as any).SUPABASE_ANON_KEY
+    };
+  }
 }
 
 export const voiceManager = new VoiceManager();
+
+// Expose to window for debugging
+if (typeof window !== 'undefined') {
+  (window as any).voiceManager = voiceManager;
+}

@@ -397,23 +397,30 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
   dlog('state updated', { teammate: teammate ? teammate.gameName + '#' + (teammate.tagLine||'') : null, phase: phaseStr });
 
         // New teammate appeared while staying in same phase (e.g., already in Lobby)
-        if (!voice.state.connected && !voice.state.connecting && voice.autoConnectInGame && teammate?.gameName && !prevTeammateRef.current) {
-          let lobbyId: string;
-          if (teammatePuuidRef.current && me?.puuid) {
-            const pair = [teammatePuuidRef.current, me.puuid].sort();
-            lobbyId = 'duo_' + pair.map(p => p.slice(0,12)).join('__');
+        if (!voice.state.connected && !voice.state.connecting && voice.autoConnectInGame && teammate?.gameName) {
+          // Allow reconnection if the teammate changed or if we're not currently connected
+          const currentTeammateId = teammate.gameName + '#' + (teammate.tagLine||'');
+          const shouldConnect = !prevTeammateRef.current || prevTeammateRef.current !== currentTeammateId;
+          
+          if (shouldConnect) {
+            let lobbyId: string;
+            if (teammatePuuidRef.current && me?.puuid) {
+              const pair = [teammatePuuidRef.current, me.puuid].sort();
+              lobbyId = 'duo_' + pair.map(p => p.slice(0,12)).join('__');
+            } else {
+              lobbyId = duoChannelId(teammate.gameName, teammate.tagLine, me?.riotId?.split('#')[0], me?.tagLine);
+            }
+            dlog('Attempt connect (TeammateAppeared)', { lobbyId, teammate: currentTeammateId, me: me?.riotId + '#' + (me?.tagLine||''), phase: phaseStr, prevTeammate: prevTeammateRef.current });
+            voice.connect(lobbyId, 'supabase://voice', { name: me?.riotId, iconId: me?.profileIconId, riotId: me?.riotId, tagLine: me?.tagLine } as any);
           } else {
-            lobbyId = duoChannelId(teammate.gameName, teammate.tagLine, me?.riotId?.split('#')[0], me?.tagLine);
+            dlog('Skip auto-connect (same teammate, already processed)', { teammate: currentTeammateId, prev: prevTeammateRef.current });
           }
-          dlog('Attempt connect (TeammateAppeared)', { lobbyId, teammate: teammate.gameName + '#' + (teammate.tagLine||''), me: me?.riotId + '#' + (me?.tagLine||''), phase: phaseStr });
-          voice.connect(lobbyId, 'supabase://voice', { name: me?.riotId, iconId: me?.profileIconId, riotId: me?.riotId, tagLine: me?.tagLine } as any);
-        }
-        else if (teammate?.gameName && voice.autoConnectInGame && !voice.state.connected && !voice.state.connecting && prevTeammateRef.current) {
-          dlog('Skip auto-connect (teammate already processed previously)', { teammate: teammate.gameName });
         } else if (teammate?.gameName && !voice.autoConnectInGame) {
           dlog('Skip auto-connect (autoConnectInGame disabled)');
         } else if (teammate?.gameName && voice.state.connecting) {
           dlog('Skip auto-connect (already connecting)');
+        } else if (teammate?.gameName && voice.state.connected) {
+          dlog('Skip auto-connect (already connected)');
         }
         prevTeammateRef.current = teammate?.gameName || null;
 
@@ -471,7 +478,9 @@ export const TeamMateVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
           }
           if (phaseStr === 'None') { // fully out
             lobbyJoinedRef.current = false; // reset for next cycle
-            dlog('Reset lobbyJoinedRef due to phase None');
+            prevTeammateRef.current = null; // reset teammate tracking to allow new connections
+            teammatePuuidRef.current = null; // reset puuid tracking
+            dlog('Reset state due to phase None', { resetTeammate: true });
           }
         }
       } catch {/* ignore */}
